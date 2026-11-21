@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:fl_clash/common/app_update.dart';
 import 'package:fl_clash/common/constant.dart';
 import 'package:fl_clash/common/exception.dart';
 import 'package:fl_clash/common/release_asset.dart';
@@ -53,7 +52,8 @@ class _PathAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    return byPath[options.uri.path]!();
+    final answer = byPath[options.uri.path];
+    return answer == null ? ResponseBody.fromString('', 404) : answer();
   }
 
   @override
@@ -145,7 +145,6 @@ void main() {
 
   group('downloadVerifiedRelease', () {
     final name = releaseAssetName(
-      line: appReleaseLine,
       version: '1.2.3',
       os: ReleaseOs.android,
       arch: ReleaseArch.arm64,
@@ -161,14 +160,18 @@ void main() {
 
     tearDown(() => directory.delete(recursive: true));
 
+    const release = '/$repository/releases/download/v1.2.3';
+    final sumsPath = '$release/${updateChecksumsName('v1.2.3')}';
+
+    Request requestAt(Map<String, ResponseBody Function()> byPath) {
+      return Request()..releaseDio.httpClientAdapter = _PathAdapter(byPath);
+    }
+
     Request requestServing(String sums, List<int> asset) {
-      return Request()
-        ..releaseDio.httpClientAdapter = _PathAdapter({
-          '/$repository/releases/download/v1.2.3/${updateChecksumsName('v1.2.3')}':
-              () => ResponseBody.fromString(sums, 200),
-          '/$repository/releases/download/v1.2.3/$name': () =>
-              ResponseBody.fromBytes(asset, 200),
-        });
+      return requestAt({
+        sumsPath: () => ResponseBody.fromString(sums, 200),
+        '$release/$name': () => ResponseBody.fromBytes(asset, 200),
+      });
     }
 
     Future<String> download(Request request) {
@@ -180,7 +183,7 @@ void main() {
     }
 
     test('keeps a file matching the published digest', () async {
-      final request = requestServing('$digest  ./$name\n', package);
+      final request = requestServing('$digest  $name\n', package);
 
       final path = await download(request);
 
@@ -188,7 +191,7 @@ void main() {
     });
 
     test('refuses a file that does not match', () async {
-      final request = requestServing('$digest  ./$name\n', utf8.encode('x'));
+      final request = requestServing('$digest  $name\n', utf8.encode('x'));
 
       await expectLater(
         download(request),
@@ -196,14 +199,48 @@ void main() {
       );
     });
 
-    test('refuses an asset the listing does not name', () async {
-      final request = requestServing('$digest  ./other.apk\n', package);
+    test('reports an asset the listing does not name as missing', () async {
+      final request = requestServing('$digest  other.apk\n', package);
 
       await expectLater(
         download(request),
-        throwsA(isA<ReleaseNotVerifiedException>()),
+        throwsA(isA<ReleaseFileMissingException>()),
       );
       expect(directory.listSync(), isEmpty);
+    });
+
+    test('reports a checksum file the release lacks as missing', () async {
+      final request = requestAt({});
+
+      await expectLater(
+        download(request),
+        throwsA(isA<ReleaseFileMissingException>()),
+      );
+    });
+
+    test('reports an asset the release lacks as missing', () async {
+      final request = requestAt({
+        sumsPath: () => ResponseBody.fromString('$digest  $name\n', 200),
+      });
+
+      await expectLater(
+        download(request),
+        throwsA(
+          isA<ReleaseFileMissingException>().having(
+            (error) => error.name,
+            'name',
+            name,
+          ),
+        ),
+      );
+    });
+
+    test('leaves any other failure as it was', () async {
+      final request = requestAt({
+        sumsPath: () => ResponseBody.fromString('', 503),
+      });
+
+      await expectLater(download(request), throwsA(isA<DioException>()));
     });
   });
 
