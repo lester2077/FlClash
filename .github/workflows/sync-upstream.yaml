@@ -1,0 +1,95 @@
+name: Sync all upstream branches
+
+on:
+  schedule:
+    - cron: '17 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-all-upstream-branches
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository_id == '1465058140'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sync branches from the upstream fork parent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: chen08209/FlClash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          api_url = os.environ['GITHUB_API_URL']
+          fork = os.environ['GITHUB_REPOSITORY']
+          upstream = os.environ['UPSTREAM']
+          headers = {
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+
+          def request(path, data=None):
+              body = json.dumps(data).encode() if data is not None else None
+              req = urllib.request.Request(api_url + path, data=body, headers=headers)
+              if body is not None:
+                  req.add_header('Content-Type', 'application/json')
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          def branches(repo):
+              page = 1
+              while True:
+                  items = request(f'/repos/{repo}/branches?per_page=100&page={page}')
+                  for item in items:
+                      yield item['name'], item['commit']['sha']
+                  if len(items) < 100:
+                      break
+                  page += 1
+
+          upstream_heads = dict(branches(upstream))
+          if not upstream_heads:
+              raise SystemExit(f'No branches found in {upstream}')
+          fork_heads = dict(branches(fork))
+          results = []
+          failed = False
+
+          for branch, sha in upstream_heads.items():
+              try:
+                  if branch not in fork_heads:
+                      request(f'/repos/{fork}/git/refs', {
+                          'ref': f'refs/heads/{branch}', 'sha': sha,
+                      })
+                      result = f'Created at {sha[:12]}'
+                  elif fork_heads[branch] == sha:
+                      result = 'Already up to date'
+                  else:
+                      response = request(f'/repos/{fork}/merge-upstream', {'branch': branch})
+                      result = response['message']
+              except urllib.error.HTTPError as error:
+                  detail = error.read().decode(errors='replace').strip()
+                  result = f'Failed (HTTP {error.code}): {detail}'
+                  failed = True
+              except (urllib.error.URLError, TimeoutError) as error:
+                  result = f'Failed: {error}'
+                  failed = True
+
+              line = f'{branch}: {result}'
+              print(line, flush=True)
+              results.append(line)
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(f'Upstream: {upstream}\n\n')
+              summary.write('\n'.join(f'- {line}' for line in results) + '\n')
+
+          raise SystemExit(1 if failed else 0)
+          PY
