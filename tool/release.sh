@@ -18,7 +18,8 @@ usage() {
 Usage: tool/release.sh <pre|stable> [options]
 
   pre                Tag the next vX.Y.Z-pre.N prerelease on HEAD, no commit.
-  stable             Write the changelog, commit it, and tag vX.Y.Z.
+  stable             Write the changelog, pause for edits, commit it, and
+                     tag vX.Y.Z.
 
 CI takes the app version from the tag and the build number from the clock,
 so neither mode writes a build number into pubspec.yaml.
@@ -30,7 +31,7 @@ Options:
                      prerelease N instead of starting N+1.
   --push             Push the branch and the tag once the local steps pass.
   --remote NAME      Remote to push to (default origin).
-  --yes              Skip the confirmation prompt.
+  --yes              Skip the confirmation prompt and the changelog pause.
   --dry-run          Report the plan and exit without changing anything.
   -h, --help         Show this help.
 
@@ -151,10 +152,10 @@ echo "version   : $current -> $version$rewritten"
 echo "tag       : $tag"
 if [[ "$mode" != "stable" ]]; then
   echo "changelog : rendered by CI from build --unreleased; nothing committed"
-  echo "publishes : build artifacts + Telegram only, no GitHub release"
+  echo "publishes : GitHub prerelease with artifacts and SHA256SUMS, Telegram link"
 else
   echo "changelog : CHANGELOG.md + changelog.json regenerated and committed"
-  echo "publishes : GitHub release with artifacts, SHA256SUMS, Homebrew cask"
+  echo "publishes : GitHub release with artifacts, SHA256SUMS, Homebrew cask, Telegram link"
 fi
 echo "push      : $([[ $do_push == 1 ]] && echo "yes, to $remote" || echo 'no (printed at the end)')"
 echo
@@ -172,11 +173,12 @@ if ((bumped)); then
 fi
 
 echo "--- release notes for $tag ---"
-if dart run tool/changelog.dart build --unreleased >/dev/null 2>&1; then
+if build_error="$(dart run tool/changelog.dart build --unreleased 2>&1 >/dev/null)"; then
   dart run tool/changelog.dart render release 2>/dev/null |
     sed -n '/changelog:begin/,/changelog:end/p' | sed '1d;$d'
 else
-  echo "(preview unavailable: 'build --unreleased' found nothing to collect)"
+  echo "(preview unavailable: 'build --unreleased' failed)"
+  printf '%s\n' "$build_error" | sed 's/^/  /'
 fi
 git checkout -- changelog.json 2>/dev/null || true
 echo "--- end of notes ---"
@@ -207,13 +209,27 @@ fi
 
 if [[ "$mode" == "stable" ]]; then
   dart run tool/changelog.dart release --version "$version"
+  if ((assume_yes == 0)); then
+    echo
+    echo "changelog.json now holds the $tag notes. Edit their wording, merge"
+    echo "entries with \"merges\" or leave commits out with \"omit\" (see"
+    echo ".agents/commands.md), then press Enter; Ctrl-C undoes the release."
+    while true; do
+      read -r <"/dev/tty" || die "no answer read; pass --yes to run unattended"
+      dart run tool/changelog.dart markdown &&
+        dart run tool/changelog.dart verify &&
+        break
+      echo "Fix changelog.json, then press Enter again; Ctrl-C undoes the release."
+    done
+  else
+    dart run tool/changelog.dart verify
+  fi
   echo
   git --no-pager diff --stat -- CHANGELOG.md changelog.json pubspec.yaml
   echo
   git add CHANGELOG.md changelog.json pubspec.yaml
   git commit -m "chore(release): v$version"
   committed=1
-  dart run tool/changelog.dart verify
 fi
 
 git tag "$tag"
