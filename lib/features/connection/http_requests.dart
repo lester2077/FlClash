@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:fl_clash/common/common.dart';
+import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/foundation.dart';
@@ -178,6 +179,14 @@ extension HttpRequestStatusExt on HttpRequestStatus {
     HttpRequestStatus.failed => currentAppLocalizations.connectionsFailed,
     HttpRequestStatus.rewritten => currentAppLocalizations.httpRewritten,
   };
+
+  String emptyLabel(AppLocalizations appLocalizations) => switch (this) {
+    HttpRequestStatus.all => appLocalizations.nullTip(
+      appLocalizations.httpRequests,
+    ),
+    HttpRequestStatus.failed => appLocalizations.noFailedHttpRequests,
+    HttpRequestStatus.rewritten => appLocalizations.noRewrittenHttpRequests,
+  };
 }
 
 typedef HttpFilterController =
@@ -206,6 +215,7 @@ class HttpRequestList extends StatelessWidget {
   final ScrollController scrollController;
   final ValueListenable<int?> selected;
   final ValueChanged<MitmExchangeSummary> onSelect;
+  final String? emptyDescription;
 
   const HttpRequestList({
     super.key,
@@ -214,6 +224,7 @@ class HttpRequestList extends StatelessWidget {
     required this.scrollController,
     required this.selected,
     required this.onSelect,
+    this.emptyDescription,
   });
 
   @override
@@ -233,9 +244,10 @@ class HttpRequestList extends StatelessWidget {
             (exchange) => ValueKey(exchange.id),
           ),
           isEmpty: exchanges.isEmpty,
-          isSearching: feed.isSearching || filters.isFiltering,
+          isSearching: feed.isSearching || filters.narrowsPastStatus,
           nullStatus: NullStatus(
-            label: appLocalizations.nullTip(appLocalizations.httpRequests),
+            label: filters.status.emptyLabel(appLocalizations),
+            description: emptyDescription,
             illustration: NullStatusIllustration.requests,
           ),
           controller: scrollController,
@@ -301,24 +313,19 @@ class HttpRequestRow extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: AppTextStyle.subheadline.of(context),
       ),
-      subtitle: Row(
-        spacing: 4,
-        children: [
-          Flexible(
-            child: Text(
-              [
-                exchange.host,
-                exchange.app?.process ?? '',
-              ].where((part) => part.isNotEmpty).join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyle.caption1
-                  .of(context)
-                  .copyWith(color: secondary),
-            ),
-          ),
-          if (mark != null) Flexible(child: MetaChip(label: mark)),
-        ],
+      subtitle: DefaultTextStyle.merge(
+        style: AppTextStyle.caption1
+            .of(context)
+            .toTabular
+            .copyWith(color: secondary),
+        child: RecordLabelLine(
+          underTitle: true,
+          text: exchange.host,
+          labels: [
+            RecordLabel(label: httpMillisText(exchange.duration)),
+            if (mark != null) RecordLabel(label: mark),
+          ],
+        ),
       ),
       trailing: Column(
         mainAxisSize: MainAxisSize.min,
@@ -333,10 +340,7 @@ class HttpRequestRow extends StatelessWidget {
                 .copyWith(color: statusColor),
           ),
           Text(
-            [
-              exchange.responseSize.traffic.show,
-              httpMillisText(exchange.duration),
-            ].join(' · '),
+            exchange.responseSize.traffic.show,
             style: AppTextStyle.caption2
                 .of(context)
                 .toTabular

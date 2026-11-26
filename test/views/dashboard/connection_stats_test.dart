@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
+import '../../helpers/route_cover.dart';
 import '../../helpers/test_app.dart';
 import '../../helpers/test_profiles.dart';
 import '../../helpers/host_scaffold.dart';
@@ -123,6 +124,53 @@ void main() {
     await teardownCard(tester);
   });
 
+  Future<void> holdCounts(WidgetTester tester) async {
+    container.read(runTimeProvider.notifier).value = 1000;
+    await pumpCard(tester);
+    container.read(requestCountProvider.notifier).value = 7;
+    await tester.pump();
+    expect(find.text('7'), findsOneWidget);
+
+    container.read(requestCountProvider.notifier).value = 1284;
+    container.read(dnsQueryCountProvider.notifier).value = 42;
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('1,284'), findsNothing);
+  }
+
+  void expectHeldCountsShown() {
+    expect(find.text('1,284'), findsOneWidget);
+    expect(find.text('42'), findsOneWidget);
+  }
+
+  testWidgets('while running, the counts after the first wait for the next '
+      'traffic sample', (tester) async {
+    await holdCounts(tester);
+    container.read(trafficsProvider.notifier).addTraffic(const Traffic());
+    await tester.pump();
+    expectHeldCountsShown();
+
+    await teardownCard(tester);
+  });
+
+  testWidgets('held counts show once the run stops', (tester) async {
+    await holdCounts(tester);
+    container.read(runTimeProvider.notifier).value = null;
+    await tester.pump();
+    expectHeldCountsShown();
+
+    await teardownCard(tester);
+  });
+
+  testWidgets('held counts show when no traffic sample comes', (tester) async {
+    await holdCounts(tester);
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(find.text('1,284'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 100));
+    expectHeldCountsShown();
+
+    await teardownCard(tester);
+  });
+
   testWidgets('a count too long for a third of a phone is shortened in any '
       'locale', (tester) async {
     when(() => core.getConnectionCount()).thenAnswer((_) async => 99999);
@@ -203,6 +251,23 @@ void main() {
 
     expect(position().pixels, position().maxScrollExtent);
     expect(find.textContaining('host-${next - 1}.test'), findsWidgets);
+
+    await teardownCard(tester);
+  });
+
+  testWidgets('a page pushed over the card and popped rebuilds none of it', (
+    tester,
+  ) async {
+    when(() => core.getConnectionCount()).thenAnswer((_) async => 34);
+    await pumpCard(tester);
+
+    expect(
+      await rebuildsWhileCovered<ConnectionStatsCard>(
+        tester,
+        find.byType(ConnectionStatsCard),
+      ),
+      0,
+    );
 
     await teardownCard(tester);
   });

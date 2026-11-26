@@ -8,7 +8,6 @@ import 'package:fl_clash/features/features.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
-import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +25,7 @@ export 'requests_detail_pane.dart' show RequestsSegment;
 class RequestsView extends ConsumerStatefulWidget {
   final ScrollController? scrollController;
   final RequestsSegment segment;
+  final ConnectionStatus status;
   final Future<List<TrackerInfo>> Function()? connectionsReader;
   final MitmQuery? httpQuery;
 
@@ -33,6 +33,7 @@ class RequestsView extends ConsumerStatefulWidget {
     super.key,
     this.scrollController,
     this.segment = RequestsSegment.connections,
+    this.status = ConnectionStatus.all,
     @visibleForTesting this.connectionsReader,
     @visibleForTesting this.httpQuery,
   });
@@ -96,7 +97,18 @@ class _RequestsViewState extends ConsumerState<RequestsView>
     _dnsFeed.addListener(_offerDns);
     _httpFeed.addListener(_offerHttp);
     _follow();
-    _filters.addListener(_showWhere);
+    _filters
+      ..status = widget.status
+      ..addListener(_showWhere);
+    if (_segment == RequestsSegment.http &&
+        !_showsHttp(ref.read(patchClashConfigProvider))) {
+      _segment = RequestsSegment.connections;
+    }
+    ref.listenManual(patchClashConfigProvider.select(_showsHttp), (_, shows) {
+      if (!shows && _segment == RequestsSegment.http) {
+        _setSegment(RequestsSegment.connections);
+      }
+    });
     ref.listenManual(requestsProvider.select((state) => state.revision), (
       _,
       _,
@@ -504,32 +516,51 @@ class _RequestsViewState extends ConsumerState<RequestsView>
     }
   }
 
-  List<PopupMenuItem> _buildMenuItems({required bool hasActive}) {
+  List<PopupMenuItem> _buildMenuItems({
+    required bool hasActive,
+    required bool offersCapture,
+  }) {
     final appLocalizations = context.appLocalizations;
-    return switch (_segment) {
-      RequestsSegment.connections => [
-        PopupMenuItem(
-          glyph: AppGlyphs.block,
-          label: appLocalizations.closeActiveConnections,
-          danger: true,
-          onPressed: hasActive ? _closeActiveConnections : null,
+    final section = offersCapture ? const PopupMenuSection() : null;
+    return [
+      if (offersCapture)
+        ...httpCaptureMenuItems(
+          ref,
+          appLocalizations,
+          mitm: ref.watch(
+            patchClashConfigProvider.select((state) => state.mitm),
+          ),
+          isAndroid: system.isAndroid,
         ),
-      ],
-      RequestsSegment.http => const [],
-      RequestsSegment.dns => [
-        PopupMenuItem(
-          glyph: AppGlyphs.broom,
-          label: appLocalizations.clearDnsCache,
-          onPressed: _clearDnsCache,
-        ),
-      ],
-    };
+      ...switch (_segment) {
+        RequestsSegment.connections => [
+          PopupMenuItem(
+            label: appLocalizations.closeActiveConnections,
+            danger: true,
+            section: section,
+            onPressed: hasActive ? _closeActiveConnections : null,
+          ),
+        ],
+        RequestsSegment.http => const <PopupMenuItem>[],
+        RequestsSegment.dns => [
+          PopupMenuItem(
+            label: appLocalizations.clearDnsCache,
+            section: section,
+            onPressed: _clearDnsCache,
+          ),
+        ],
+      },
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final hasActive = ref.watch(
       requestsProvider.select((log) => log.activeCount > 0),
+    );
+    final showsHttp = ref.watch(patchClashConfigProvider.select(_showsHttp));
+    final offersCapture = ref.watch(
+      patchClashConfigProvider.select(_offersCapture),
     );
     final body = Stack(
       fit: StackFit.passthrough,
@@ -552,7 +583,13 @@ class _RequestsViewState extends ConsumerState<RequestsView>
                 (_) => _settleDetail(),
               );
             }
-            return _buildPage(body, split: split, hasActive: hasActive);
+            return _buildPage(
+              body,
+              split: split,
+              hasActive: hasActive,
+              showsHttp: showsHttp,
+              offersCapture: offersCapture,
+            );
           },
         ),
       ),
@@ -626,18 +663,22 @@ class _RequestsViewState extends ConsumerState<RequestsView>
     Widget body, {
     required bool split,
     required bool hasActive,
+    required bool showsHttp,
+    required bool offersCapture,
   }) {
     final mobile = ViewScope.isMobileOf(context);
     final list = mobile
         ? body
         : TrackerSelection(selected: _selected, onSelect: _select, child: body);
-    final header = _buildHeader();
+    final header = _buildHeader(showsHttp: showsHttp);
     return Scaffold(
       title: PageLabel.requests.label,
       searchState: AppBarSearchState(onSearch: _search),
       header: split ? null : header,
-      statusActions: [if (rsFeature) const HttpCaptureEntry()],
-      menuItems: _buildMenuItems(hasActive: hasActive),
+      menuItems: _buildMenuItems(
+        hasActive: hasActive,
+        offersCapture: offersCapture,
+      ),
       body: split ? _buildSplit(header, list) : list,
     );
   }
@@ -691,7 +732,7 @@ class _RequestsViewState extends ConsumerState<RequestsView>
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader({required bool showsHttp}) {
     return Padding(
       padding: const EdgeInsets.only(top: _headerTop, bottom: 4),
       child: Column(
@@ -708,7 +749,7 @@ class _RequestsViewState extends ConsumerState<RequestsView>
                   RequestsSegment.connections,
                   context.appLocalizations.connections,
                 ),
-                if (rsFeature) (RequestsSegment.http, 'HTTP'),
+                if (showsHttp) (RequestsSegment.http, 'HTTP'),
                 (RequestsSegment.dns, 'DNS'),
               ],
               value: _segment,
@@ -719,11 +760,8 @@ class _RequestsViewState extends ConsumerState<RequestsView>
             RequestsSegment.connections => ConditionFilterRow(
               controller: _filters,
             ),
-            RequestsSegment.http => Consumer(
-              builder: (_, ref, _) =>
-                  ref.watch(patchClashConfigProvider.select(httpCapturing))
-                  ? ConditionFilterRow(controller: _httpFilters)
-                  : const SizedBox.shrink(),
+            RequestsSegment.http => ConditionFilterRow(
+              controller: _httpFilters,
             ),
             RequestsSegment.dns => ConditionFilterRow(controller: _dnsFilters),
           },
@@ -732,25 +770,27 @@ class _RequestsViewState extends ConsumerState<RequestsView>
     );
   }
 
-  /// Until capture is on, the list's place holds the switch that turns it on.
   Widget _buildHttp(ScrollController scrollController) {
     return Consumer(
       builder: (context, ref, _) {
-        final capturing = ref.watch(
-          patchClashConfigProvider.select(httpCapturing),
+        final appLocalizations = context.appLocalizations;
+        final hasModule = ref.watch(
+          mitmModulesProvider.select(
+            (state) => state.value?.any((module) => module.enabled) == true,
+          ),
         );
-        if (!capturing) {
-          return ListView(
-            padding: context.listInsets.page(bottom: 16 + context.bottomInset),
-            children: const [HttpCaptureSwitch(last: true)],
-          );
-        }
+        final noHost = ref.watch(
+          patchClashConfigProvider.select(
+            (state) => httpCaptureHasNoHost(state, hasModule),
+          ),
+        );
         return HttpRequestList(
           feed: _httpFeed,
           filters: _httpFilters,
           scrollController: scrollController,
           selected: _httpSelected,
           onSelect: _selectHttp,
+          emptyDescription: noHost ? appLocalizations.httpCaptureNoHosts : null,
         );
       },
     );
@@ -763,9 +803,10 @@ class _RequestsViewState extends ConsumerState<RequestsView>
       child: RecordFeedView<String>(
         rows: _rows,
         isEmpty: _rows.shownCount == 0,
-        isSearching: SearchQuery(_query).isNotEmpty || _filters.isFiltering,
+        isSearching:
+            SearchQuery(_query).isNotEmpty || _filters.narrowsPastStatus,
         nullStatus: NullStatus(
-          label: appLocalizations.nullTip(appLocalizations.connections),
+          label: _filters.status.emptyLabel(appLocalizations),
           illustration: NullStatusIllustration.connections,
         ),
         controller: scrollController,
@@ -779,10 +820,15 @@ class _RequestsViewState extends ConsumerState<RequestsView>
           detailTitle: _detailTitleOf(context),
           onClose: _closeConnection,
         ),
+        addAutomaticKeepAlives: false,
       ),
     );
   }
 }
+
+bool _showsHttp(PatchClashConfig state) => rsFeature && httpCapturing(state);
+
+bool _offersCapture(PatchClashConfig state) => rsFeature && state.mitm.enable;
 
 const _listWidth = 392.0;
 const _headerTop = 4.0;

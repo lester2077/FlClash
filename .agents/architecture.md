@@ -519,8 +519,9 @@ force or is being asked again. The mechanism has three parts.
   come in bursts: a network switch reports more than once, and a launch applies the config and starts the
   listeners back to back. A new route version keeps every answer on show and sends their hits to `checkRoutes` in
   one call, at once for the first move and, for the moves that follow within `probeSettleDuration`, together when
-  it ends, so groups re-picking moments apart cost one check more; only an answer whose exit moved is
-  dropped and asked again, and one that held takes the checked version. An answer that lands under an older version
+  it ends. A successful probe whose exit held takes the checked version. A moved exit or a failed probe from
+  an earlier version is asked again. The exit alone cannot establish whether a failed probe's front proxy still
+  takes the same route. An answer that lands under an older version
   than the state is held back as checking until its own check returns, so it never shows and then flips. An ask
   that is not the user's or a reset's waits out `probeThrottleDuration` since the target's last probe, so a config
   load whose providers, rule sets and url-test picks land over a few seconds moves an exit at most one probe more.
@@ -534,12 +535,14 @@ force or is being asked again. The mechanism has three parts.
   or closed connection, a failed lookup, a Core that gave no answer — may be the route still settling or a
   connection something else closed (`closeConnections` after a proxy switch closes the routed probes too), so a watched
   target stays checking and is asked once more after `probeConfirmDelay`; it shows as failed when the
-  second attempt agrees, and a failure that spent its whole deadline (`ProbeAnswer.timedOut`) shows at once.
-  A failure on show is not asked again while the route holds still, since the same exit would only be asked the
-  same thing: it waits for a reset, a moved exit, a proxy the user switched, `refresh`, or the app resuming
-  (`markResumed`), which asks the watched ones again on show. A reset or a moved exit makes the next failure one
-  to confirm again, and
-  a service check that timed out is a failure that still shows its status. `refresh` is the user's own request and
+  second attempt agrees under the same route version, and a failure that spent its whole deadline (`ProbeAnswer.timedOut`) shows at once.
+  A watched service can recover on the same route. After a failure is displayed, the first automatic recheck
+  runs one minute later. Continued failures wait two minutes, then five minutes after each result. The previous
+  status stays visible during these checks. Hiding or locking the app cancels service retry timers, and a result
+  arriving while hidden starts none. Showing the app rearms watched failures. On resume, `markResumed` can ask
+  sooner, once the normal five-second `probeThrottleDuration` since the last check expires. Success, route invalidation
+  and releasing the last watcher clear the backoff. Outbound IP failures keep their existing event-driven retries.
+  A reset or moved exit makes the next early failure one to confirm again. `refresh` is the user's own request and
   runs for unwatched targets too: the service sheet reads the cache and never watches its rows, because one service
   check is one to four full HTTPS fetches where a delay test is a single empty request.
 
@@ -1236,16 +1239,16 @@ than the frames a load costs. What a transition must not carry is work that repe
   fallback only once the load ends
   without an image, so a grid of placeholders is never painted only to be replaced. `whenRouteSettled`
   (`prism_ui/lib/navigator.dart`) is left for sequencing navigation, such as opening a page once the sheet above it is gone.
-- Two views arrive after the motion. `EditorPage` keeps the document it opened until its route has settled and only
+- Three views arrive after the motion. `EditorPage` keeps the document it opened until its route has settled and only
   then mounts CodeForge, sliding in with its spinner until then: the mount lays out, folds and highlights a screen of
-  text in one frame, which a phone cannot fit in a transition frame whatever the file's size. The spinner, with no
-  surface behind it, leaves in the frame the text mounts rather than fading: a fade there runs over the bar items
-  fading in after the route settles, and on a phone at 120 Hz the two together overran a frame.
+  text in one frame, which a phone cannot fit in a transition frame whatever the file's size.
   `AccessView` reads the installed apps only once its route has settled and its bar items have faded in
   (`whenNothingAnimates`, not counting its own spinner), and slides in with that spinner when this run has not read
-  them yet (`NullStatusSwitcher` with `holdsArrival: false`): the read can outlast `arrivalHoldLimit`, and a list of
-  apps landing while its page moves reads as dropped frames. The spinner only repaints its own boundary. A list
-  already read shows from the first frame.
+  them yet: a list of apps landing while its page moves reads as dropped frames. The spinner only repaints its own
+  boundary. A list already read shows from the first frame. `MitmOptionsView` asks the platform whether its
+  certificate is trusted only once its route has settled and its bar items have faded in: on Android the answer is
+  built on the main thread, which the UI isolate shares, and the first ask took 43 ms of the push's first frame on a
+  phone.
 - A live feed holds its refreshes while its page moves and replays the latest once it is still, so a list does not
   re-rank, reorder or grow under a transition. `RouteMotionHoldMixin` (`prism_ui/lib/route_motion_hold.dart`) holds them
   while `isRouteMoving`: the page's route or a sheet carrying it is pushed, popped or dragged, a page is pushed over it,
@@ -1264,11 +1267,12 @@ than the frames a load costs. What a transition must not carry is work that repe
   (`IconGridScrollView`) and the access control list do this, and so does `ListEditorPage`, whose rows are heavy
   enough that only its list rebuilds as the extent widens, reusing the rows already built.
 - A page whose content waits on what it loads (lists read from the database, file sizes, the installed fonts) shows
-  nothing until all of it is in, then the finished content in one step: `NullStatusSwitcher.isLoading`. A load that can
-  run long also gives the switcher a `loadingStatus`, its `NullStatus` illustration with no label or a page
-  `ActivityIndicator`, which takes the place of a first load still running after about a route transition (400 ms);
-  one that ends sooner goes straight to its content, so it never flashes. The custom profile, resources and font
-  family pages show the illustration; access control, which waits on the system's app list, shows the spinner. Never a
+  nothing of it until all of it is in, then the finished content in one step: `NullStatusSwitcher.isLoading`. Its push
+  never waits for the load: the page slides in with the switcher's `loadingStatus`, a page `ActivityIndicator` unless
+  the page passes its `NullStatus` illustration, as the font family sheet does. On a pushed page that stays at least
+  `minimumLoadingDuration` (400 ms) once shown, so a load that ends just after it appears never flashes it, and the
+  content takes its place once the route has settled and nothing else animates; a home page shows it once loaded. The content comes in under a veil of the surface
+  color fading off it rather than through an `Opacity` layer, and a page leaving before then never mounts it. Never a
   skeleton screen of placeholder rows: it has to guess how many rows are coming, fills in piece by piece, and rebuilds
   every row it stood in for. `SkeletonText` is for a single value inside a card that is already on screen, such as the
   dashboard's service status.
