@@ -32,6 +32,19 @@ class _RunRequest {
   });
 }
 
+const _trafficLapse = Duration(milliseconds: 1500);
+
+const _closestBeats = Duration(milliseconds: 500);
+
+int _nextRunTime(int? shown, Duration elapsed) {
+  final rounded = (elapsed.inMilliseconds / 1000).round() * 1000;
+  if (shown == null) {
+    return rounded;
+  }
+  final next = shown + 1000;
+  return (next - elapsed.inMilliseconds).abs() > 1000 ? rounded : next;
+}
+
 @Riverpod(keepAlive: true)
 class SetupAction extends _$SetupAction {
   CoreController get _core => ref.read(coreHandlerProvider);
@@ -40,8 +53,11 @@ class SetupAction extends _$SetupAction {
   final _setupScheduler = SerialTaskScheduler();
   final _listenerScheduler = SerialTaskScheduler();
   _RunRequest? _latestRunRequest;
+  Future<void>? _initialRun;
   DateTime? _startTime;
+  DateTime? _runTimeMovedAt;
   var _resumeOnRestart = false;
+  var _exiting = false;
   ({String digest, Set<String> names})? _outboundNames;
   _SetupInputs? _appliedInputs;
   var _lastPushDuration = Duration.zero;
@@ -59,32 +75,48 @@ class SetupAction extends _$SetupAction {
     }
   }
 
-  bool get _isRunning => _startTime != null && _startTime!.isBeforeNow;
-
   @override
   void build() {
     ref.onDispose(_stopRuntimeTicker);
+    ref.listen(trafficsProvider, (_, _) => _tickWithTraffic());
     ref.listen(appVisibleProvider, (_, _) => _syncRuntimeTicker());
+    ref.listen(screensSeenProvider, (_, _) => _syncRuntimeTicker());
     ref.listen(
       appSettingProvider.select((state) => state.showTrayTitle),
       (_, _) => _syncRuntimeTicker(),
     );
   }
 
-  bool get _isTrafficShown =>
-      ref.read(appVisibleProvider) ||
-      (system.isMacOS &&
-          !ref.read(safeModeProvider) &&
-          ref.read(appSettingProvider).showTrayTitle);
+  /// The clock and the chart move with every sample; the macOS menu bar title,
+  /// all a hidden window shows, needs only the samples that change it.
+  TrafficFeed get _trafficFeed {
+    if (_exiting || _startTime == null || !ref.read(screensSeenProvider)) {
+      return TrafficFeed.off;
+    }
+    if (ref.read(appVisibleProvider)) {
+      return TrafficFeed.everySecond;
+    }
+    final titled =
+        system.isMacOS &&
+        !ref.read(safeModeProvider) &&
+        ref.read(appSettingProvider).showTrayTitle;
+    return titled ? TrafficFeed.changesOnly : TrafficFeed.off;
+  }
 
   SetupParams get _setupParams => SetupParams(
     selectedMap: ref.read(selectedMapProvider),
     options: ref.read(coreOptionsProvider),
+    host: hostSettingsOf(
+      ref.read(patchClashConfigProvider),
+      credential: ref.read(hostCredentialProvider),
+      safeMode: ref.read(safeModeProvider),
+    ),
   );
 
-  // The selection reaches the Core through changeProxy, not through an apply.
+  // The selection reaches the Core through changeProxy and the host settings
+  // through a patch, not through an apply.
   SetupParams get _appliedParams =>
-      _setupParams.copyWith(selectedMap: const {});
+      _setupParams.copyWith(selectedMap: const {}, host: null);
 
   Future<bool> fullSetup() async {
     if (!ref.read(initProvider)) return true;
@@ -92,7 +124,9 @@ class SetupAction extends _$SetupAction {
     ref.read(delayDataSourceProvider.notifier).value = {};
     final setupResult = applyProfile(force: true);
     ref.read(logsProvider.notifier).value = FixedList(maxLogsLength);
-    ref.read(requestsProvider.notifier).value = FixedList(maxRequestsLength);
+    ref.read(requestsProvider.notifier).value = ConnectionLog(
+      maxRequestsLength,
+    );
     ref.read(dnsQueriesProvider.notifier).value = FixedList(
       maxDnsQueriesLength,
     );
@@ -110,33 +144,54 @@ class SetupAction extends _$SetupAction {
     _stopRuntimeTicker();
     if (!running) {
       _startTime = null;
-      ref.read(commonActionProvider.notifier).setTrafficFeed(false);
+      ref.read(commonActionProvider.notifier).setTrafficFeed(TrafficFeed.off);
       debouncer.cancel(FunctionTag.applyProfile);
       _pendingForceApply = false;
       _updateRunTime();
       return;
     }
 
-    _startTime ??= DateTime.now();
+    _startTime ??= clock.now();
     _updateRunTime();
     _syncRuntimeTicker();
   }
 
+  /// Exit closes the window before the Core; a hidden window would otherwise
+  /// open a fresh menu bar title watch on a Core that is about to go.
+  void endTrafficFeedForExit() {
+    _exiting = true;
+    _syncRuntimeTicker();
+  }
+
   void _syncRuntimeTicker() {
-    final shown = _startTime != null && _isTrafficShown;
-    ref.read(commonActionProvider.notifier).setTrafficFeed(shown);
-    if (!shown) {
+    final feed = _trafficFeed;
+    ref.read(commonActionProvider.notifier).setTrafficFeed(feed);
+    if (feed != TrafficFeed.everySecond) {
       _stopRuntimeTicker();
       return;
     }
     if (_runtimeTimer != null) {
       return;
     }
+    _tickOnItsOwn();
+  }
+
+  void _tickOnItsOwn() {
     _refreshRunningState();
     _runtimeTimer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _refreshRunningState(),
     );
+  }
+
+  void _tickWithTraffic() {
+    final timer = _runtimeTimer;
+    if (timer == null) {
+      return;
+    }
+    timer.cancel();
+    _refreshRunningState();
+    _runtimeTimer = Timer(_trafficLapse, _tickOnItsOwn);
   }
 
   void _stopRuntimeTicker() {
@@ -150,22 +205,46 @@ class SetupAction extends _$SetupAction {
 
   void _updateRunTime() {
     final startTime = _startTime;
-    ref.read(runTimeProvider.notifier).value = startTime == null
-        ? null
-        : DateTime.now().millisecondsSinceEpoch -
-              startTime.millisecondsSinceEpoch;
+    final runTime = ref.read(runTimeProvider.notifier);
+    if (startTime == null) {
+      _runTimeMovedAt = null;
+      runTime.value = null;
+      return;
+    }
+    final now = clock.now();
+    final movedAt = _runTimeMovedAt;
+    // A sample landing just after the ticker's own beat is the same second.
+    if (movedAt != null && now.difference(movedAt) < _closestBeats) {
+      return;
+    }
+    _runTimeMovedAt = now;
+    runTime.value = _nextRunTime(runTime.value, now.difference(startTime));
   }
 
   @protected
   Future<DateTime?> serviceStartTime() async => service?.getRunTime();
 
   Future<void> initStatus() async {
-    if (!globalState.needInitStatus) {
+    if (_initialRun == null) {
+      await _restoreStatus();
+    }
+    Future<void>? joined;
+    while (!identical(joined, _initialRun)) {
+      joined = _initialRun;
+      await joined;
+    }
+  }
+
+  Future<void> _restoreStatus() async {
+    final startTime = await serviceStartTime();
+    final running = startTime?.isBeforeNow ?? false;
+    final digest = running ? await preferences.getAppliedConfigMd5() : null;
+    if (_initialRun != null) {
       return;
     }
-    _startTime = await serviceStartTime();
-    if (_isRunning) {
-      globalState.lastConfigMd5 = await preferences.getAppliedConfigMd5();
+    _startTime = startTime;
+    if (running) {
+      globalState.lastConfigMd5 = digest;
       await _run(true, initialize: true, resume: true);
     } else if (ref.read(appSettingProvider).autoRun) {
       await setRunning(true, initialize: true);
@@ -212,10 +291,12 @@ class SetupAction extends _$SetupAction {
     _latestRunRequest = request;
     _resumeOnRestart = false;
     _setLocalRunning(running);
-    if (request.initialize) {
-      globalState.needInitStatus = false;
+    final task = running ? _start(request) : _stop(request);
+    if (initialize || _initialRun != null && !ref.read(initProvider)) {
+      // The caller reports the outcome. Bootstrap waits for the transition to settle.
+      _initialRun = task.then<void>((_) {}, onError: (Object _) {});
     }
-    return running ? _start(request) : _stop(request);
+    return task;
   }
 
   Future<bool> _start(_RunRequest request) async {
@@ -384,6 +465,7 @@ class SetupAction extends _$SetupAction {
         configPatchOf(
           _effectivePatchConfig(patchConfig),
           authentication: networkSetting.authentication.credentials,
+          hostCredential: ref.read(hostCredentialProvider),
           options: ref.read(coreOptionsProvider),
         ),
       );
@@ -551,10 +633,21 @@ class SetupAction extends _$SetupAction {
     try {
       return await ref.read(coreActionProvider.notifier).restartCore();
     } catch (_) {
-      ref.read(authorizedTunEnableProvider.notifier).value =
-          TunAuthorizationState.none;
+      _forgetTunAuthorization();
       rethrow;
     }
+  }
+
+  /// A restart asks first, as [_setupConfig] would before handing off to it:
+  /// the apply inside the restart must not hand off to the restart it runs in.
+  /// Returns whether it was granted now.
+  Future<bool> _authorizeTunBeforeRestart() async {
+    return !await requestAdmin(ref.read(patchClashConfigProvider).tun.enable);
+  }
+
+  void _forgetTunAuthorization() {
+    ref.read(authorizedTunEnableProvider.notifier).value =
+        TunAuthorizationState.none;
   }
 
   /// With a base, [BuiltProfile.yaml] is only the overlay the Core applies.
@@ -563,23 +656,6 @@ class SetupAction extends _$SetupAction {
     required PatchClashConfig patchConfig,
   }) async {
     final profileId = setupState.profileId;
-    if (profileId == null) {
-      final yaml = await encodeYamlTask(
-        inboundConfigOf(
-          patchConfig,
-          authentication: ref
-              .read(networkSettingProvider)
-              .authentication
-              .credentials,
-        ),
-      );
-      return (
-        yaml: yaml,
-        md5: yaml.toMd5(),
-        counts: configCountsOf(const {}),
-        base: null,
-      );
-    }
     final defaultUA = globalState.packageInfo.ua;
     final networkSetting = ref.read(
       networkSettingProvider.select(
@@ -594,7 +670,7 @@ class SetupAction extends _$SetupAction {
     final isCustom = setupState.profileType == ProfileType.custom;
     final scriptContent = isCustom ? null : await setupState.script?.content;
     final hasScript = scriptContent?.isNotEmpty == true;
-    final profileBase = !isCustom && !hasScript
+    final profileBase = profileId != null && !isCustom && !hasScript
         ? await _core.getProfileBase(profileId)
         : null;
     Map<String, dynamic> rawConfig = isCustom
@@ -605,7 +681,8 @@ class SetupAction extends _$SetupAction {
               groups: setupState.proxyGroups,
             ),
           }
-        : profileBase?.base.config ?? await _core.readConfig(profileId);
+        : profileBase?.base.config ??
+              (profileId == null ? {} : await _core.readConfig(profileId));
     final proxyGroups = isCustom ? setupState.proxyGroups : <ProxyGroup>[];
     final rules = isCustom ? setupState.rules : <Rule>[];
     if (hasScript) {
@@ -614,7 +691,7 @@ class SetupAction extends _$SetupAction {
     final directory = await appPath.profilesPath;
     final hasCustomExit =
         setupState.addedRules.any((rule) => rule.customExit) ||
-        setupState.mitmModules.isNotEmpty;
+        setupState.mitmModules.any((module) => module.policies.isNotEmpty);
     final injected = await _resolveInjectedProviders(
       setupState,
       proxyGroups: proxyGroups,
@@ -637,9 +714,13 @@ class SetupAction extends _$SetupAction {
         defaultUA: defaultUA,
         authentication: networkSetting.authentication.credentials,
         exitTargets: setupState.exitTargets,
-        outboundNames: profileBase != null && hasCustomExit
-            ? await _outboundNamesOf(profileId, profileBase.base.digest)
-            : null,
+        outboundNames: switch ((profileId, profileBase)) {
+          (final id?, final base?) when hasCustomExit => await _outboundNamesOf(
+            id,
+            base.base.digest,
+          ),
+          _ => null,
+        },
         defaultExitTarget: profileBase == null
             ? null
             : lastMatchTarget(profileBase.base.matchRules),
@@ -760,15 +841,15 @@ class SetupAction extends _$SetupAction {
             authorized &&
             !ref.read(tunDisabledThisRunProvider),
       ),
-      externalController: patchConfig.secret.isEmpty
-          ? ExternalControllerStatus.close
-          : patchConfig.externalController,
+      externalController: effectiveControllerOf(patchConfig, safeMode: false),
     );
   }
 
-  /// The Core ignores the profile's `external-controller` and `secret` while
-  /// a host drives it and opens the controller from a patch only.
-  Future<void> _openController(PatchClashConfig config) async {
+  /// An apply carries the host settings; a resume that applies nothing sends
+  /// them too, for a Core that started from params saved before they did, and
+  /// the options, which hand the CA trust a native start checked back to the
+  /// app's own check.
+  Future<void> _patchHostSettings(PatchClashConfig config) async {
     try {
       await _core.updateConfig(
         ConfigPatch(
@@ -777,11 +858,13 @@ class SetupAction extends _$SetupAction {
           externalControllerCors: controllerCorsOf(
             config.externalControllerCors,
           ),
+          hostCredential: ref.read(hostCredentialProvider),
+          options: coreOptionsArgOf(ref.read(coreOptionsProvider)),
         ),
       );
     } catch (error) {
       commonPrint.log(
-        'external controller: ${compactError(error)}',
+        'host settings: ${compactError(error)}',
         logLevel: coreFailureLogLevel(error),
       );
     }
@@ -901,6 +984,8 @@ class SetupAction extends _$SetupAction {
       _appliedInputs = inputs;
       globalState.lastConfigCounts = realProfile.counts;
       await preloadInvoke?.call();
+      await _loadConfigWarnings();
+      await _patchHostSettings(realPatchConfig);
       return _SetupTaskResult.completed;
     }
     // Go answers a config it rejects by running its built-in default, which
@@ -965,10 +1050,10 @@ class SetupAction extends _$SetupAction {
         }
         await _loadConfigWarnings();
         globalState.lastConfigMd5 = yamlMd5;
+        ref.invalidate(activeRulesProvider);
         globalState.lastConfigCounts =
             realProfile?.counts ?? configCountsOf(const {});
         _appliedInputs = inputs;
-        await _openController(realPatchConfig);
         if (system.isAndroid) {
           await preferences.saveAppliedConfigMd5(yamlMd5);
         }

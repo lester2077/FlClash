@@ -24,6 +24,36 @@ final _responsePrefix = utf8.encode('{"jsonrpc":"2.0","id":');
 
 typedef Decoder<T> = T Function(Object? result);
 
+/// A string counts its UTF-16 length, which its UTF-8 never undercuts.
+bool _encodesToAtLeast(Object? value, int bytes) {
+  var left = bytes;
+  bool reached(Object? node) {
+    switch (node) {
+      case String():
+        left -= node.length + 2;
+      case Map():
+        left -= 2;
+        for (final entry in node.entries) {
+          if (reached(entry.key) || reached(entry.value)) {
+            return true;
+          }
+        }
+      case List():
+        left -= 2;
+        for (final item in node) {
+          if (reached(item)) {
+            return true;
+          }
+        }
+      default:
+        left -= 1;
+    }
+    return left <= 0;
+  }
+
+  return reached(value);
+}
+
 /// What one batch of a stream carried. [snapshot] is set on the first frame of
 /// a subscription and again after a resync, which means the consumer must drop
 /// what it held; [resynced] marks a frame that follows lost events.
@@ -61,13 +91,14 @@ final class CoreClient {
   late final StreamSubscription<Uint8List> _frameSubscription;
   late final StreamSubscription<ChannelEvent> _eventSubscription;
   final Map<int, _Pending> _pending = {};
-  final Map<int, _Watch<Object?, Object?>> _watches = {};
+  final Set<_Watch<Object?, Object?>> _watches = {};
   final Map<int, _Watch<Object?, Object?>> _watchesBySub = {};
   int _nextId = 0;
   int? _helloGeneration;
   Future<HelloResult>? _hello;
   HelloResult? _session;
   bool _closed = false;
+  Future<void>? _sendTail;
 
   CoreClient(
     this._channel, {
@@ -191,7 +222,7 @@ final class CoreClient {
       method,
       {
         ...?(params as Map<String, Object?>?),
-        'credit': _initialCredit,
+        'credit': 0,
         'maxBatchMs': ?maxBatchMs,
         'maxBatchBytes': ?maxBatchBytes,
       },
@@ -228,28 +259,28 @@ final class CoreClient {
         TimeoutException('Core method $method timed out', timeout),
       );
     });
-    try {
-      _channel.send(
-        _encoder.convert({
-          'jsonrpc': '2.0',
-          'id': id,
-          'method': method,
-          'params': ?params,
-        }),
-      );
-    } catch (error) {
-      _pending.remove(id);
+    void failed(Object error) {
+      if (_pending.remove(id) == null) {
+        return;
+      }
       pending.timer?.cancel();
-      return (
-        id: id,
-        result: Future<T>.error(
-          CoreMethodException(
-            code: 'transport_error',
-            message: 'Unable to send $method to Core',
-            details: error.toString(),
-          ),
+      pending.completer.completeError(
+        CoreMethodException(
+          code: 'transport_error',
+          message: 'Unable to send $method to Core',
+          details: error.toString(),
         ),
       );
+    }
+
+    try {
+      _send(
+        {'jsonrpc': '2.0', 'id': id, 'method': method, 'params': ?params},
+        isWanted: () => _pending.containsKey(id),
+        failed: failed,
+      );
+    } catch (error) {
+      failed(error);
     }
     return (
       id: id,
@@ -257,18 +288,48 @@ final class CoreClient {
     );
   }
 
+  /// Messages go out in the order sent: one after a large message waits for it.
+  void _send(
+    Map<String, Object?> message, {
+    bool Function()? isWanted,
+    void Function(Object error)? failed,
+  }) {
+    final queued = _sendTail;
+    final large = _encodesToAtLeast(message, coreOffloadBytes);
+    if (queued == null && !large) {
+      _channel.send(_encoder.convert(message));
+      return;
+    }
+    late final Future<void> sent;
+    sent = (queued ?? Future<void>.value())
+        .then((_) async {
+          final frame = large
+              ? await _encodeOffIsolate(message)
+              : _encoder.convert(message);
+          if (_closed || !(isWanted?.call() ?? true)) {
+            return;
+          }
+          _channel.send(frame);
+        })
+        .catchError((Object error) => failed?.call(error))
+        .whenComplete(() {
+          if (identical(_sendTail, sent)) {
+            _sendTail = null;
+          }
+        });
+    _sendTail = sent;
+  }
+
+  /// Static, so the closure carries only [message] to the isolate.
+  static Future<List<int>> _encodeOffIsolate(Map<String, Object?> message) =>
+      Isolate.run(() => _encoder.convert(message));
+
   void _notify(String method, Map<String, Object?> params) {
     if (_closed) {
       return;
     }
     try {
-      _channel.send(
-        _encoder.convert({
-          'jsonrpc': '2.0',
-          'method': method,
-          'params': params,
-        }),
-      );
+      _send({'jsonrpc': '2.0', 'method': method, 'params': params});
     } catch (_) {}
   }
 
@@ -330,13 +391,13 @@ final class CoreClient {
     final decode = pending.decode;
     Object? outcome;
     try {
-      outcome = await Isolate.run(() => _decodeResponse(frame, decode));
-    } catch (_) {
-      try {
-        outcome = _decodeResponse(frame, decode);
-      } catch (error) {
-        outcome = _Failed(error);
-      }
+      outcome = await Isolate.run(() => _settleResponse(frame, decode));
+    } catch (error) {
+      commonPrint.log(
+        'Core response $id decoded on the UI isolate: $error',
+        logLevel: LogLevel.warning,
+      );
+      outcome = _settleResponse(frame, decode);
     }
     final current = _pending.remove(id);
     if (current == null) {
@@ -415,7 +476,7 @@ final class CoreClient {
         entry.completer.completeError(error);
       }
     }
-    for (final watch in List.of(_watches.values)) {
+    for (final watch in List.of(_watches)) {
       watch.fail(error);
     }
   }
@@ -446,6 +507,16 @@ final class _Failed {
   final Object error;
 
   const _Failed(this.error);
+}
+
+/// A failure comes back as a value, so only a response or error that cannot
+/// cross the isolate falls back to decoding again.
+Object? _settleResponse(Uint8List frame, Decoder<Object?> decode) {
+  try {
+    return _decodeResponse(frame, decode);
+  } catch (error) {
+    return _Failed(error);
+  }
 }
 
 Object? _decodeResponse(Uint8List frame, Decoder<Object?> decode) {
@@ -498,6 +569,7 @@ final class _Watch<S, E> {
 
   void _start() {
     _active = true;
+    _client._watches.add(this as _Watch<Object?, Object?>);
     unawaited(_open());
   }
 
@@ -507,16 +579,13 @@ final class _Watch<S, E> {
       if (!_active) {
         return;
       }
-      final call = _client._begin<_Opened<S>>(_method, _params, (result) {
-        final body = result as JsonMap;
-        final decode = _decodeSnapshot;
-        final snapshot = decode == null || body['snapshot'] == null
-            ? null
-            : decode(body['snapshot']);
-        return (sub: body['sub'] as int, snapshot: snapshot);
-      }, _defaultTimeout);
+      final call = _client._begin<_Opened<S>>(
+        _method,
+        _params,
+        _openedDecoder(_decodeSnapshot),
+        _defaultTimeout,
+      );
       _requestId = call.id;
-      _client._watches[call.id] = this as _Watch<Object?, Object?>;
       final opened = await call.result;
       _opened(call.id, opened);
     } catch (error) {
@@ -525,14 +594,24 @@ final class _Watch<S, E> {
     }
   }
 
+  static Decoder<_Opened<T>> _openedDecoder<T>(Decoder<T>? decode) {
+    return (result) {
+      final body = result as JsonMap;
+      final snapshot = decode == null || body['snapshot'] == null
+          ? null
+          : decode(body['snapshot']);
+      return (sub: body['sub'] as int, snapshot: snapshot);
+    };
+  }
+
   void _opened(int requestId, _Opened<S> opened) {
     if (!_active || _requestId != requestId) {
       _client._notify(r'$/cancel', {'id': requestId});
-      _client._watches.remove(requestId);
       return;
     }
     _sub = opened.sub;
     _client._watchesBySub[opened.sub] = this as _Watch<Object?, Object?>;
+    _client._notify(r'$/credit', {'sub': opened.sub, 'n': _initialCredit});
     final resynced = _resyncing;
     _resyncing = false;
     _controller.add(WatchFrame(snapshot: opened.snapshot, resynced: resynced));
@@ -555,7 +634,16 @@ final class _Watch<S, E> {
     final events = <E>[];
     var last = false;
     for (final item in params['data'] as List? ?? const []) {
-      final event = _decodeEvent(item as JsonMap);
+      final E event;
+      try {
+        event = _decodeEvent(item as JsonMap);
+      } catch (error) {
+        commonPrint.log(
+          'Unable to read a $_method event: $error',
+          logLevel: LogLevel.error,
+        );
+        continue;
+      }
       events.add(event);
       last = last || (_isLast?.call(event) ?? false);
     }
@@ -596,10 +684,6 @@ final class _Watch<S, E> {
     if (sub != null) {
       _client._watchesBySub.remove(sub);
     }
-    final id = _requestId;
-    if (id != null) {
-      _client._watches.remove(id);
-    }
     _sub = null;
     _requestId = null;
     _owed = 0;
@@ -612,6 +696,7 @@ final class _Watch<S, E> {
 
   Future<void> _stop() async {
     _active = false;
+    _client._watches.remove(this);
     _reopen?.cancel();
     final id = _requestId;
     if (id != null) {
@@ -623,6 +708,7 @@ final class _Watch<S, E> {
   void fail(Object error) {
     final wasActive = _active;
     _active = false;
+    _client._watches.remove(this);
     _reopen?.cancel();
     _detach();
     if (wasActive && !_controller.isClosed) {

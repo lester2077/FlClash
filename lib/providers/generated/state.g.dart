@@ -48,7 +48,7 @@ final class UpdateParamsProvider
   }
 }
 
-String _$updateParamsHash() => r'33ff114f768d5113413f8f7deb93a0177fc52d72';
+String _$updateParamsHash() => r'5fd57ac0367e819679f998b431f82077d99d7192';
 
 @ProviderFor(coreOptions)
 final coreOptionsProvider = CoreOptionsProvider._();
@@ -436,7 +436,7 @@ final class SharedStateProvider
   }
 }
 
-String _$sharedStateHash() => r'01242beabaf290f6dde0e2b2c639b6931db37f54';
+String _$sharedStateHash() => r'c17e27e4c88f230b2c5f267057486f3cffe61221';
 
 @ProviderFor(vpnRouteAddress)
 final vpnRouteAddressProvider = VpnRouteAddressProvider._();
@@ -513,7 +513,7 @@ final class VpnOptionsProvider
   }
 }
 
-String _$vpnOptionsHash() => r'cb60357f2706d545ce4b78b38c2af2f8f1ad9f32';
+String _$vpnOptionsHash() => r'9defd158beb047b441d029c3feff09f5277b16bb';
 
 @ProviderFor(AccessControlState)
 final accessControlStateProvider = AccessControlStateProvider._();
@@ -3046,7 +3046,7 @@ final class NavigationItemsStateProvider
 }
 
 String _$navigationItemsStateHash() =>
-    r'3c633d4f3e5f2e80b7cfd166a46397f9a207bb1e';
+    r'484e9ddc85dc9adfd7869a16a2d031f84ae25165';
 
 @ProviderFor(currentNavigationItemsState)
 final currentNavigationItemsStateProvider =
@@ -3848,7 +3848,7 @@ final class SetupStateProvider
   }
 }
 
-String _$setupStateHash() => r'ea2026faab4f89458df501968b673cfbebf6878b';
+String _$setupStateHash() => r'b07d474cde7488ad1f80bc1a58b222902bd8822d';
 
 final class SetupStateFamily extends $Family
     with $FunctionalFamilyOverride<FutureOr<SetupState>, int?> {

@@ -8,6 +8,7 @@ import com.google.gson.JsonParser
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,6 +24,10 @@ class CoreCallException(
 private const val INITIAL_CREDIT = 4
 private const val PROTOCOL_VERSION = 1
 
+private val timeouts =
+    ScheduledThreadPoolExecutor(1) { task -> Thread(task, "core-client-timeout").apply { isDaemon = true } }
+        .apply { removeOnCancelPolicy = true }
+
 private class Pending(
     val result: CompletableFuture<JsonElement?>,
     val onResult: ((JsonObject) -> Unit)? = null,
@@ -31,6 +36,11 @@ private class Pending(
 private class Call(
     val id: Long,
     val result: CompletableFuture<JsonElement?>,
+)
+
+private class Watch(
+    val callId: Long,
+    val onBatch: (JsonElement) -> Unit,
 )
 
 /**
@@ -43,13 +53,14 @@ class CoreClient(
     private val clientName: String = "flclash-service",
     private val clientVersion: String = "",
     private val timeoutMillis: Long = 30_000,
+    private val asyncTimeoutMillis: Long = 180_000,
     private val log: (String) -> Unit = {},
 ) {
     private val gson = Gson()
     private val lock = Any()
     private val ids = AtomicLong()
     private val pending = ConcurrentHashMap<Long, Pending>()
-    private val watches = ConcurrentHashMap<Long, (JsonElement) -> Unit>()
+    private val watches = ConcurrentHashMap<Long, Watch>()
     private val endings = ConcurrentHashMap<Long, () -> Unit>()
 
     @Volatile
@@ -59,13 +70,23 @@ class CoreClient(
     fun callAsync(
         method: String,
         params: Any? = null,
-    ): CompletableFuture<JsonElement?> = begin(method, params, null).result
+    ): CompletableFuture<JsonElement?> {
+        val result = begin(method, params).result
+        val timeout =
+            timeouts.schedule(
+                { result.completeExceptionally(CoreCallException("timeout", "$method did not answer in $asyncTimeoutMillis ms")) },
+                asyncTimeoutMillis,
+                TimeUnit.MILLISECONDS,
+            )
+        result.whenComplete { _, _ -> timeout.cancel(false) }
+        return result
+    }
 
     fun call(
         method: String,
         params: Any? = null,
         timeoutMillis: Long = this.timeoutMillis,
-    ): JsonElement? = await(begin(method, params, null).result, method, timeoutMillis)
+    ): JsonElement? = await(begin(method, params).result, method, timeoutMillis)
 
     /** Opens a stream method for its snapshot alone and unsubscribes at once. */
     fun snapshot(
@@ -73,7 +94,7 @@ class CoreClient(
         params: Map<String, Any?>,
         timeoutMillis: Long = this.timeoutMillis,
     ): JsonObject? {
-        val call = begin(method, params + ("credit" to 0), null)
+        val call = begin(method, params + ("credit" to 0))
         try {
             return await(call.result, method, timeoutMillis) as? JsonObject
         } finally {
@@ -105,30 +126,36 @@ class CoreClient(
     }
 
     /**
-     * Subscribes to a stream method. [onEvent] gets each element of each batch, and credit goes
-     * back as batches are handled. Closing the result unsubscribes. [onLost] runs once if the
-     * stream cannot open or the session ends under it, and not after a close.
+     * Subscribes to a stream method. [onSnapshot] gets the snapshot the subscription opens with,
+     * before any event; [onEvent] gets each element of each batch, and credit goes back as batches
+     * are handled. Closing the result unsubscribes. [onLost] runs once if the stream cannot open
+     * or the session ends under it, and not after a close.
      */
     fun watch(
         method: String,
         params: Map<String, Any?>,
         onLost: () -> Unit = {},
+        onSnapshot: (JsonElement) -> Unit = {},
         onEvent: (JsonElement) -> Unit,
     ): AutoCloseable {
         val sub = AtomicLong(-1)
         val closed = AtomicBoolean()
+        val callId = ids.incrementAndGet()
+        endings[callId] = onLost
         val call =
-            begin(method, params + ("credit" to INITIAL_CREDIT)) { opened ->
+            begin(method, params + ("credit" to INITIAL_CREDIT), callId) { opened ->
                 val id = opened.get("sub").asLong
                 if (closed.get()) return@begin
-                watches[id] = { batch ->
-                    val elements = if (batch is JsonArray) batch.toList() else listOf(batch)
-                    elements.forEach(onEvent)
-                    notify("\$/credit", mapOf("sub" to id, "n" to 1))
-                }
+                opened.get("snapshot")?.takeUnless { it.isJsonNull }?.let(onSnapshot)
+                watches[id] =
+                    Watch(callId) { batch ->
+                        val elements = if (batch is JsonArray) batch.toList() else listOf(batch)
+                        elements.forEach(onEvent)
+                        notify("\$/credit", mapOf("sub" to id, "n" to 1))
+                    }
                 sub.set(id)
+                if (closed.get()) watches.remove(id)
             }
-        endings[call.id] = onLost
         call.result.whenComplete { _, error ->
             reportFailure(method, error)
             if (error != null) endings.remove(call.id)?.invoke()
@@ -161,10 +188,10 @@ class CoreClient(
     private fun begin(
         method: String,
         params: Any?,
-        onResult: ((JsonObject) -> Unit)?,
+        id: Long = ids.incrementAndGet(),
+        onResult: ((JsonObject) -> Unit)? = null,
     ): Call {
         val future = CompletableFuture<JsonElement?>()
-        val id = ids.incrementAndGet()
         val live =
             try {
                 ensureReady()
@@ -281,8 +308,12 @@ class CoreClient(
 
     private fun event(params: JsonObject) {
         val sub = params.get("sub").asLong
+        if (params.get("resync")?.asBoolean == true) {
+            watches.remove(sub)?.let { endings.remove(it.callId)?.invoke() }
+            return
+        }
         val data = params.get("data") ?: return
-        watches[sub]?.invoke(data)
+        watches[sub]?.onBatch?.invoke(data)
     }
 
     private fun failure(error: JsonObject): CoreCallException {

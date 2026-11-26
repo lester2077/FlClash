@@ -11,6 +11,7 @@ import 'package:fl_clash/providers/app.dart';
 import 'package:fl_clash/providers/config.dart';
 import 'package:fl_clash/providers/core.dart';
 import 'package:fl_clash/providers/database.dart';
+import 'package:fl_clash/providers/mitm.dart';
 import 'package:fl_clash/providers/state.dart';
 import 'package:fl_clash/state.dart';
 import 'package:fl_clash/ui/ui.dart';
@@ -76,7 +77,8 @@ class _LostRecordingSetupAction extends SetupAction {
 
 class _Feeds {
   final crashes = StreamController<String>.broadcast();
-  final dns = StreamController<List<DnsEntry>>.broadcast();
+  final dns =
+      StreamController<({List<DnsEntry> entries, int dropped})>.broadcast();
   final events = StreamController<List<CoreEventDto>>.broadcast();
   final connections = StreamController<ConnectionUpdate>.broadcast();
   final proxies = StreamController<ProxyUpdate>.broadcast();
@@ -125,27 +127,30 @@ _Harness _harness() {
   return (mocks: mocks, feeds: feeds);
 }
 
-ConnectionInfo _connection(int id, {int upload = 0, int download = 0}) =>
-    ConnectionInfo(
-      id: id,
-      start: 1,
-      network: 'tcp',
-      sourceIp: '10.0.0.1',
-      sourcePort: 5000 + id,
-      destinationPort: 443,
-      host: 'host$id.test',
-      inboundType: 'http',
-      chains: const ['DIRECT'],
-      rule: 'MATCH',
-      upload: upload,
-      download: download,
-    );
+ConnectionInfo _connection(
+  int id, {
+  int upload = 0,
+  int download = 0,
+  String? host,
+}) => ConnectionInfo(
+  id: id,
+  start: 1,
+  network: 'tcp',
+  sourceIp: '10.0.0.1',
+  sourcePort: 5000 + id,
+  destinationPort: 443,
+  host: host ?? 'host$id.test',
+  inboundType: 'http',
+  chains: const ['DIRECT'],
+  rule: 'MATCH',
+  upload: upload,
+  download: download,
+);
 
 Future<ProviderContainer> _pumpCoreManager(
   WidgetTester tester,
   CoreController core, {
   List<Override> overrides = const [],
-  bool? pausesInBackground,
 }) async {
   final container = ProviderContainer(
     overrides: [coreHandlerProvider.overrideWithValue(core), ...overrides],
@@ -160,10 +165,7 @@ Future<ProviderContainer> _pumpCoreManager(
           globalState.measure = Measure.of(context, 1);
           return BannerHost(stacked: false, topInset: 0, child: child!);
         },
-        home: CoreManager(
-          pausesInBackground: pausesInBackground,
-          child: const SizedBox(),
-        ),
+        home: const CoreManager(child: SizedBox()),
       ),
     ),
   );
@@ -174,13 +176,11 @@ Future<ProviderContainer> _pumpConnected(
   WidgetTester tester,
   _Harness harness, {
   List<Override> overrides = const [],
-  bool? pausesInBackground,
 }) async {
   final container = await _pumpCoreManager(
     tester,
     harness.mocks.controller,
     overrides: overrides,
-    pausesInBackground: pausesInBackground,
   );
   container.read(coreStatusProvider.notifier).value = CoreStatus.connected;
   await tester.pump();
@@ -216,6 +216,7 @@ Future<List<WarningInfo>> _applied(MockCoreApi api) => api.applyConfig(
   overlay: any(named: 'overlay'),
   selection: any(named: 'selection'),
   options: any(named: 'options'),
+  host: any(named: 'host'),
 );
 
 void main() {
@@ -256,7 +257,6 @@ void main() {
     harness.feeds.crashes
       ..add('boom')
       ..add('boom');
-    harness.feeds.events.add(const [FatalEvent('boom')]);
     await tester.pump();
 
     expect(container.read(coreStatusProvider), CoreStatus.disconnected);
@@ -267,32 +267,24 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   });
 
-  for (final (name, report) in <(String, void Function(_Feeds))>[
-    ('the backend crash stream', (feeds) => feeds.crashes.add('boom')),
-    ('a fatal event', (feeds) => feeds.events.add(const [FatalEvent('boom')])),
-  ]) {
-    testWidgets('$name while the app is visible surfaces the message', (
-      tester,
-    ) async {
-      final harness = _harness();
-      final container = await _pumpCoreManager(
-        tester,
-        harness.mocks.controller,
-      );
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      container.read(coreStatusProvider.notifier).value = CoreStatus.connected;
-      await tester.pump();
+  testWidgets('a crash while the app is visible surfaces the message', (
+    tester,
+  ) async {
+    final harness = _harness();
+    final container = await _pumpCoreManager(tester, harness.mocks.controller);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    container.read(coreStatusProvider.notifier).value = CoreStatus.connected;
+    await tester.pump();
 
-      report(harness.feeds);
-      await tester.pump();
-      await tester.pump();
+    harness.feeds.crashes.add('boom');
+    await tester.pump();
+    await tester.pump();
 
-      expect(container.read(coreStatusProvider), CoreStatus.disconnected);
-      expect(find.text('boom'), findsOneWidget);
+    expect(container.read(coreStatusProvider), CoreStatus.disconnected);
+    expect(find.text('boom'), findsOneWidget);
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
-  }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('a crash ends the run here without telling the Core to stop', (
     tester,
@@ -315,6 +307,75 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('connections still open close once the core is gone', (
+    tester,
+  ) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+    harness.feeds.connections.add(
+      ConnectionsReset(ConnectionSnapshot([_connection(1)])),
+    );
+    await tester.pump();
+    expect(container.read(requestsProvider).activeCount, 1);
+
+    container.read(coreStatusProvider.notifier).value = CoreStatus.disconnected;
+    await tester.pump();
+
+    expect(container.read(requestsProvider).activeCount, 0);
+    expect(container.read(requestsProvider)[1]!.closedAt, isNotNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a Core connected again starts the requests and DNS queries '
+      'over, so the ids it numbers from 1 again meet no earlier ones', (
+    tester,
+  ) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+    DnsEntry query(String domain) => DnsEntry(
+      domain: domain,
+      type: 'A',
+      initiator: 'user',
+      upstream: '',
+      cached: false,
+      answers: const ['1.1.1.1'],
+      rcode: '',
+      error: '',
+      delay: 3,
+      time: 1,
+    );
+    harness.feeds.connections.add(
+      ConnectionsReset(ConnectionSnapshot([_connection(1), _connection(2)])),
+    );
+    harness.feeds.dns.add((entries: [query('before.test')], dropped: 0));
+    await tester.pump();
+    final status = container.read(coreStatusProvider.notifier);
+    status.value = CoreStatus.disconnected;
+    await tester.pump();
+    expect(container.read(requestsProvider)[1]!.isActive, isFalse);
+
+    status.value = CoreStatus.connected;
+    await tester.pump();
+    harness.feeds.connections.add(
+      ConnectionsChanged(
+        ConnectionDelta(opened: [_connection(1, host: 'after.test')]),
+      ),
+    );
+    harness.feeds.dns.add((entries: [query('after.test')], dropped: 0));
+    await tester.pump();
+
+    final log = container.read(requestsProvider);
+    expect(log.list.map((request) => request.metadata.host), ['after.test']);
+    expect(log[1]!.isActive, isTrue);
+    expect(
+      container.read(dnsQueriesProvider).list.map((query) => query.domain),
+      ['after.test'],
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('a crash is ignored when the core is not connected', (
@@ -549,21 +610,24 @@ void main() {
     final harness = _harness();
     final container = await _pumpConnected(tester, harness);
 
-    harness.feeds.dns.add([
-      for (final domain in ['alpha.test', 'beta.test'])
-        DnsEntry(
-          domain: domain,
-          type: 'A',
-          initiator: 'user',
-          upstream: '',
-          cached: false,
-          answers: const ['1.1.1.1'],
-          rcode: '',
-          error: '',
-          delay: 3,
-          time: 1,
-        ),
-    ]);
+    harness.feeds.dns.add((
+      entries: [
+        for (final domain in ['alpha.test', 'beta.test'])
+          DnsEntry(
+            domain: domain,
+            type: 'A',
+            initiator: 'user',
+            upstream: '',
+            cached: false,
+            answers: const ['1.1.1.1'],
+            rcode: '',
+            error: '',
+            delay: 3,
+            time: 1,
+          ),
+      ],
+      dropped: 0,
+    ));
     await tester.pump();
 
     expect(
@@ -575,9 +639,97 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('connection updates are recorded, counted and kept up to date', (
+  testWidgets('a connection names the DNS queries that gave its address', (
     tester,
   ) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+
+    harness.feeds.dns.add((
+      entries: [
+        DnsEntry.fromJson({
+          'id': 7,
+          'domain': 'host1.test',
+          'type': 'A',
+          'initiator': 'rule',
+          'answers': ['1.1.1.1'],
+          'delay': 3,
+          'time': 1,
+        }),
+      ],
+      dropped: 0,
+    ));
+    harness.feeds.connections.add(
+      ConnectionsChanged(
+        ConnectionDelta(
+          opened: [
+            ConnectionInfo.fromJson({
+              'id': 1,
+              'start': 1,
+              'network': 'tcp',
+              'sourceIp': '10.0.0.1',
+              'sourcePort': 5001,
+              'destinationPort': 443,
+              'host': 'host1.test',
+              'inboundType': 'http',
+              'chains': ['DIRECT'],
+              'rule': 'MATCH',
+              'upload': 0,
+              'download': 0,
+              'dnsQueries': [7],
+            }),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(container.read(dnsQueriesProvider).list.single.id, 7);
+    expect(container.read(requestsProvider)[1]!.dnsQueries, [7]);
+    expect(container.read(requestsProvider).resolvedBy(7), [1]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a closed connection keeps why and when the core says it '
+      'ended', (tester) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+    harness.feeds.connections.add(
+      ConnectionsReset(ConnectionSnapshot([_connection(1), _connection(2)])),
+    );
+    await tester.pump();
+
+    harness.feeds.connections.add(
+      ConnectionsChanged(
+        ConnectionDelta.fromJson({
+          'closed': [1, 2],
+          'ended': [
+            {'id': 1, 'reason': 'remote', 'endedAt': 5000},
+            {
+              'id': 2,
+              'reason': 'timeout',
+              'endedAt': 6000,
+              'message': 'read timed out',
+            },
+          ],
+        }),
+      ),
+    );
+    await tester.pump();
+
+    final log = container.read(requestsProvider);
+    expect(log[1]!.isActive, isFalse);
+    expect(log[1]!.end!.reason, ConnectionEndReason.remote);
+    expect(log[1]!.endedAt, DateTime.fromMillisecondsSinceEpoch(5000));
+    expect(log[2]!.end!.reason, ConnectionEndReason.timeout);
+    expect(log[2]!.end!.message, 'read timed out');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('connection updates are recorded, counted, kept up to date '
+      'and closed', (tester) async {
     final harness = _harness();
     final container = await _pumpConnected(tester, harness);
 
@@ -597,6 +749,7 @@ void main() {
         ConnectionDelta(
           opened: [_connection(3)],
           counters: const [ConnectionCounter(id: 1, upload: 7, download: 9)],
+          closed: const [2],
         ),
       ),
     );
@@ -607,64 +760,282 @@ void main() {
     expect(container.read(requestCountProvider), 3);
     expect(requests.first.upload, 7);
     expect(requests.first.download, 9);
+    expect(requests.map((request) => request.isActive), [true, false, true]);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets('a connection whose dial failed is recorded closed, with why', (
+    tester,
+  ) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+    JsonMap failed(int id, String kind) => {
+      'id': id,
+      'start': 1,
+      'network': 'tcp',
+      'sourceIp': '10.0.0.1',
+      'sourcePort': 5000,
+      'destinationPort': 443,
+      'host': 'host$id.test',
+      'inboundType': 'http',
+      'chains': ['Proxy'],
+      'rule': 'MATCH',
+      'upload': 0,
+      'download': 0,
+      'failure': {'kind': kind, 'message': 'i/o timeout'},
+    };
+
+    harness.feeds.connections.add(
+      ConnectionsChanged(
+        ConnectionDelta.fromJson({
+          'opened': [failed(1, 'timeout'), failed(2, 'a kind yet to come')],
+          'closed': [1, 2],
+          'counters': [
+            {'id': 1, 'upload': 0, 'download': 0},
+            {'id': 2, 'upload': 0, 'download': 0},
+          ],
+        }),
+      ),
+    );
+    await tester.pump();
+
+    final log = container.read(requestsProvider);
+    expect(log[1]!.isActive, isFalse);
+    expect(
+      log[1]!.failure,
+      const ConnectionFailure(
+        kind: ConnectionFailureKind.timeout,
+        message: 'i/o timeout',
+      ),
+    );
+    expect(log[2]!.failure?.kind, ConnectionFailureKind.other);
+    expect(container.read(requestCountProvider), 2);
+    expect(container.read(connectionBookProvider).count, 0);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  ({
+    StreamController<ConnectionUpdate> lifecycle,
+    StreamController<ConnectionUpdate> counting,
+  })
+  splitConnectionWatches(_Harness harness) {
+    final lifecycle = StreamController<ConnectionUpdate>.broadcast();
+    final counting = StreamController<ConnectionUpdate>.broadcast();
+    addTearDown(lifecycle.close);
+    addTearDown(counting.close);
+    when(
+      () => harness.mocks.api.watchConnections(
+        maxBatchMs: 250,
+        counters: any(named: 'counters'),
+      ),
+    ).thenAnswer(
+      (invocation) => invocation.namedArguments[#counters] == true
+          ? counting.stream
+          : lifecycle.stream,
+    );
+    return (lifecycle: lifecycle, counting: counting);
+  }
 
   testWidgets(
     'connection counters are asked for only while a view shows them',
     (tester) async {
       final harness = _harness();
-      final asked = <bool>[];
-      when(
-        () => harness.mocks.api.watchConnections(
-          maxBatchMs: 250,
-          counters: any(named: 'counters'),
-        ),
-      ).thenAnswer((invocation) {
-        asked.add(invocation.namedArguments[#counters] as bool);
-        return harness.feeds.connections.stream;
-      });
+      final watches = splitConnectionWatches(harness);
       final container = await _pumpConnected(tester, harness);
-      expect(asked, [false]);
+      expect(watches.lifecycle.hasListener, isTrue);
+      expect(watches.counting.hasListener, isFalse);
 
       final demand = container.read(connectionBookProvider).demand..acquire();
       await tester.pump();
       demand.acquire();
       await tester.pump();
-      expect(asked, [false, true]);
+      expect(watches.counting.hasListener, isTrue);
+
+      watches.lifecycle.add(
+        ConnectionsReset(ConnectionSnapshot([_connection(1)])),
+      );
+      watches.counting.add(
+        const ConnectionsChanged(
+          ConnectionDelta(
+            counters: [
+              ConnectionCounter(id: 1, upload: 5, download: 6),
+              ConnectionCounter(id: 9, upload: 1, download: 1),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(container.read(requestsProvider)[1]!.download, 6);
+      expect(container.read(requestsProvider)[9], isNull);
 
       demand
         ..release()
         ..release();
       await tester.pump();
-      expect(asked, [false, true, false]);
+      expect(watches.counting.hasListener, isFalse);
+      expect(watches.lifecycle.hasListener, isTrue);
 
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
-  testWidgets('the connection feed is not read while the app is in the '
-      'background and catches up on return', (tester) async {
+  testWidgets('a connection that opens and closes as counters are turned on '
+      'is recorded with its totals', (tester) async {
     final harness = _harness();
-    final container = await _pumpConnected(
-      tester,
-      harness,
-      pausesInBackground: true,
-    );
+    final watches = splitConnectionWatches(harness);
+    final container = await _pumpConnected(tester, harness);
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    container.read(connectionBookProvider).demand.acquire();
+    await tester.pump();
+    watches.lifecycle.add(
+      ConnectionsChanged(
+        ConnectionDelta(
+          opened: [_connection(1)],
+          closed: const [1],
+          counters: const [ConnectionCounter(id: 1, upload: 3, download: 4)],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final request = container.read(requestsProvider)[1];
+    expect(request?.isActive, isFalse);
+    expect(request?.download, 4);
+    expect(container.read(requestCountProvider), 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('the connection feed is not read while the app is out of '
+      'sight and catches up on return', (tester) async {
+    final harness = _harness();
+    final container = await _pumpConnected(tester, harness);
+
+    container.read(appVisibleProvider.notifier).value = false;
     harness.feeds.connections.add(
       ConnectionsReset(ConnectionSnapshot([_connection(1)])),
     );
     await tester.pump();
     expect(container.read(requestCountProvider), 0);
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    container.read(appVisibleProvider.notifier).value = true;
     await tester.pump();
     expect(container.read(requestCountProvider), 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  group('DNS and logs while the app is out of sight', () {
+    DnsEntry query(int id) => DnsEntry(
+      id: id,
+      domain: 'q$id.test',
+      type: 'A',
+      initiator: 'user',
+      upstream: '',
+      cached: false,
+      answers: const [],
+      rcode: '',
+      error: '',
+      delay: 1,
+      time: 1,
+    );
+
+    Future<List<String>> run(WidgetTester tester, {required bool hide}) async {
+      final harness = _harness();
+      final container = await _pumpConnected(tester, harness);
+      container
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(openLogs: true));
+      await tester.pump();
+      if (hide) {
+        container.read(appVisibleProvider.notifier).value = false;
+      }
+      for (var i = 0; i < 3; i++) {
+        harness.feeds.dns.add((
+          entries: [query(i * 2), query(i * 2 + 1)],
+          dropped: 0,
+        ));
+        harness.feeds.logs.add([
+          LogEntry(level: 'info', time: 1, text: 'line $i'),
+        ]);
+      }
+      await tester.pump();
+      if (hide) {
+        expect(container.read(dnsQueriesProvider).list, isEmpty);
+        expect(container.read(logsProvider).list, isEmpty);
+        container.read(appVisibleProvider.notifier).value = true;
+        await tester.pump();
+      }
+      final shown = [
+        ...container.read(dnsQueriesProvider).list.map((query) => query.domain),
+        ...container.read(logsProvider).list.map((log) => log.payload),
+        '${container.read(dnsQueryCountProvider)}',
+      ];
+      await tester.pumpWidget(const SizedBox.shrink());
+      return shown;
+    }
+
+    testWidgets('what arrives meanwhile is listed on return as if never '
+        'paused', (tester) async {
+      final unpaused = await run(tester, hide: false);
+      expect(await run(tester, hide: true), unpaused);
+      expect(unpaused.last, '6');
+    });
+
+    testWidgets('the queries the Core dropped count in the total', (
+      tester,
+    ) async {
+      final harness = _harness();
+      final container = await _pumpConnected(tester, harness);
+
+      harness.feeds.dns.add((entries: [query(9)], dropped: 5));
+      await tester.pump();
+
+      expect(container.read(dnsQueryCountProvider), 6);
+      expect(container.read(dnsQueriesProvider).list, hasLength(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('an error logged while hidden is listed without a banner, and '
+        'a new one still has its banner', (tester) async {
+      final harness = _harness();
+      final container = await _pumpConnected(tester, harness);
+      container
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(openLogs: true));
+      await tester.pump();
+
+      container.read(appVisibleProvider.notifier).value = false;
+      final hiddenAt = DateTime.now().millisecondsSinceEpoch;
+      harness.feeds.logs.add([
+        LogEntry(level: 'error', time: hiddenAt - 1, text: 'while hidden'),
+      ]);
+      await tester.pump();
+      container.read(appVisibleProvider.notifier).value = true;
+      await tester.pump();
+      await tester.pump();
+
+      expect(container.read(logsProvider).list.map((log) => log.payload), [
+        'while hidden',
+      ]);
+      expect(find.text('while hidden'), findsNothing);
+
+      harness.feeds.logs.add([
+        LogEntry(
+          level: 'error',
+          time: DateTime.now().millisecondsSinceEpoch,
+          text: 'after return',
+        ),
+      ]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('after return'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 3));
+    });
   });
 
   testWidgets('a reconnect starts the connection book afresh', (tester) async {
@@ -932,6 +1303,44 @@ void main() {
     await tester.pump(const Duration(seconds: 10));
   });
 
+  test('a script notification links only to a web address', () {
+    expect(
+      scriptNotificationLink('https://a.test/x'),
+      Uri.parse('https://a.test/x'),
+    );
+    expect(scriptNotificationLink(''), isNull);
+    expect(scriptNotificationLink('file:///etc/hosts'), isNull);
+    expect(scriptNotificationLink('clash://install-config?url=x'), isNull);
+    expect(scriptNotificationLink('http://[::1'), isNull);
+    expect(scriptNotificationLink('https:///no-host'), isNull);
+  });
+
+  testWidgets('a burst of script notifications shows its first alone', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final harness = _harness();
+    await _pumpConnected(tester, harness);
+    String shown(String title) =>
+        currentAppLocalizations.scriptNotification('sign', title);
+
+    harness.feeds.events.add(const [
+      ScriptNotificationEvent(script: 'sign', title: 'one'),
+      ScriptNotificationEvent(script: 'sign', title: 'two'),
+    ]);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text(shown('one')), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text(shown('two')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 10));
+  });
+
   testWidgets('geo events are forwarded to the geo resource action', (
     tester,
   ) async {
@@ -967,6 +1376,93 @@ void main() {
 
     expect(container.read(isUpdatingProvider(key)), isFalse);
     expect(find.text('background failure'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a module is read again once the Core stores its files', (
+    tester,
+  ) async {
+    final harness = _harness();
+    var reads = 0;
+    final container = await _pumpConnected(
+      tester,
+      harness,
+      overrides: [
+        mitmModuleContentProvider(7).overrideWith((ref) async {
+          reads++;
+          return null;
+        }),
+      ],
+    );
+    final subscription = container.listen(
+      mitmModuleContentProvider(7),
+      (_, _) {},
+    );
+    addTearDown(subscription.close);
+    await tester.pump();
+    expect(reads, 1);
+
+    for (final phase in [ResourcePhase.updating, ResourcePhase.unchanged]) {
+      harness.feeds.events.add([
+        ResourceUpdateEvent(
+          kind: ResourceKind.mitmModule,
+          name: '7',
+          phase: phase,
+        ),
+      ]);
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(reads, 1);
+
+    harness.feeds.events.add(const [
+      ResourceUpdateEvent(
+        kind: ResourceKind.mitmModule,
+        name: '7',
+        phase: ResourcePhase.updated,
+      ),
+    ]);
+    await tester.pump();
+    await tester.pump();
+    expect(reads, 2);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a geo update whose end the events lost stops showing as '
+      'updating', (tester) async {
+    final harness = _harness();
+    final container = await _pumpConnected(
+      tester,
+      harness,
+      overrides: [
+        proxiesActionProvider.overrideWith(_RecordingProxiesAction.new),
+      ],
+    );
+    final key = GeoResource.MMDB.updatingKey;
+    final subscription = container.listen<bool>(
+      isUpdatingProvider(key),
+      (_, _) {},
+    );
+    addTearDown(subscription.close);
+    when(() => harness.mocks.api.providers()).thenAnswer((_) async => const []);
+
+    harness.feeds.events.add(const [
+      ResourceUpdateEvent(
+        kind: ResourceKind.geo,
+        name: 'MMDB',
+        phase: ResourcePhase.updating,
+      ),
+    ]);
+    await tester.pump();
+    expect(container.read(isUpdatingProvider(key)), isTrue);
+
+    harness.feeds.events.add(const [EventsResynced()]);
+    await tester.pump();
+    await tester.pump();
+
+    expect(container.read(isUpdatingProvider(key)), isFalse);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

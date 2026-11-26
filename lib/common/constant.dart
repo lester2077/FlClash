@@ -21,8 +21,9 @@ const packageDisplayName = rsSideBySide ? 'FlClash RS' : appName;
 const sideBySideName = rsSideBySide ? 'FlClash rs' : appName;
 const _appSlug = rsSideBySide ? 'flclash-rs' : 'flclash';
 
-/// Root mode stays out of the network page until its TUN start is fixed.
-const rootTunOffered = false;
+/// The status card's glow while su is granted stays off until the card shows
+/// something that needs root again.
+const suAccessGlowShown = false;
 
 /// Kept on every line: subscription servers match it in the User-Agent and
 /// the Helper accepts a Core socket only under a directory of this name.
@@ -143,6 +144,9 @@ const maxConcurrentDelayTests = 32;
 const maxConcurrentImports = 4;
 const maxConcurrentIconLoads = 8;
 
+/// The largest well an app's icon fills: a desktop detail header's.
+const appIconExtent = 52.0;
+
 const renderThrottleDuration = Duration(milliseconds: 300);
 const defaultUpdateDuration = Duration(days: 1);
 const MMDB = 'GEOIP.metadb';
@@ -169,6 +173,7 @@ const configKey = 'config';
 const systemDnsRecordKey = 'system_dns_record';
 const bootRecordKey = 'boot_record';
 const appliedConfigMd5Key = 'applied_config_md5';
+const hostCredentialKey = 'host_credential';
 const repository = 'chen08209/FlClash';
 const maxMobileWidth = 600;
 const maxLaptopWidth = 840;
@@ -214,11 +219,10 @@ const profilesStoreKey = PageStorageKey<String>('profiles');
 
 const defaultPrimaryColor = 0xFF007AFF;
 
-const maxLogsLength = 5000;
+const maxLogsLength = 1024;
 const maxRequestsLength = 2000;
-const maxDnsQueriesLength = 3000;
+const maxDnsQueriesLength = 1024;
 const pausedMaxLogsLength = maxLogsLength * 2;
-const pausedMaxRequestsLength = maxRequestsLength * 2;
 const pausedMaxDnsQueriesLength = maxDnsQueriesLength * 2;
 
 const trafficSampleLength = 30;

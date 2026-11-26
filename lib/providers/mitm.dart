@@ -7,7 +7,7 @@ import 'package:collection/collection.dart';
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/common/mitm_body.dart';
 import 'package:fl_clash/common/mitm_protobuf.dart';
-import 'package:fl_clash/common/mitm_module.dart';
+import 'package:fl_clash/common/mitm_module_file.dart';
 import 'package:fl_clash/common/mitm_network.dart';
 import 'package:fl_clash/common/mitm_trust.dart';
 import 'package:fl_clash/enum/enum.dart';
@@ -315,25 +315,174 @@ Future<_MitmLineCheck> _checkOf(Ref ref, MitmRules mitm) async {
   return (issues: byLine(check.issues), views: byLine(check.views));
 }
 
+/// A line of one of a module's lists, as the module writes it, with how the
+/// Core reads it or why it does not apply.
+typedef MitmModuleLine = ({
+  int line,
+  String text,
+  String? issue,
+  MitmLineView? view,
+});
+
+typedef MitmModuleDetails = ({
+  MitmModuleRead read,
+  Map<MitmList, List<MitmModuleLine>> lists,
+});
+
+typedef MitmHostRow = ({String host, bool exclude, String? issue});
+
+String mitmHostText(MitmHostEntry entry) => switch (entry.port) {
+  final port? when entry.host.contains(':') => '[${entry.host}]:$port',
+  final port? => '${entry.host}:$port',
+  null => entry.host,
+};
+
+/// An issue the Core gives no item for stays with its whole line.
+bool _reasonsCover(MitmLineView? view) =>
+    view is MitmHostsView && view.entries.any((entry) => entry.reason != null);
+
+final _hostRows = Expando<List<MitmHostRow>>();
+final _hostSearchTexts = Expando<({String excluded, List<String> texts})>();
+
+extension MitmModuleDetailsExt on MitmModuleDetails {
+  MitmNetwork get network => MitmNetwork.fromCoreJson(read.network);
+
+  /// Nothing in it applies or is left out of a section: not a module at all.
+  bool get isEmpty =>
+      read.rules.isEmpty &&
+      read.ruleSets.isEmpty &&
+      read.arguments.isEmpty &&
+      read.resources.isEmpty &&
+      read.declaredScripts.isEmpty &&
+      network.isEmpty &&
+      lists.values.every((lines) => lines.isEmpty) &&
+      read.ignored.every(
+        (line) => line.reason == 'section' && line.detail == null,
+      );
+
+  List<String> hostsOf(MitmList list) => [
+    for (final line in lists[list] ?? const <MitmModuleLine>[])
+      if (line.view case MitmHostsView(:final entries))
+        for (final entry in entries)
+          if (!entry.exclude && entry.reason == null)
+            entry.port == null ? entry.host : '${entry.host}:${entry.port}',
+  ];
+
+  List<MitmHostRow> get hostRows => _hostRows[lists] ??= [
+    for (final line
+        in lists[MitmList.hostname] ?? const <MitmModuleLine>[]) ...[
+      if (line.view case MitmHostsView(:final entries))
+        for (final entry in entries)
+          (
+            host: mitmHostText(entry),
+            exclude: entry.exclude,
+            issue: entry.reason,
+          ),
+      if (line.issue case final issue? when !_reasonsCover(line.view))
+        (host: line.text, exclude: false, issue: issue),
+    ],
+  ];
+
+  /// What a search matches in each of [hostRows], made once per label for
+  /// the excluded ones: the rows are records, which an [Expando] cannot key.
+  List<String> hostSearchTexts(String excluded) {
+    final rows = hostRows;
+    if (_hostSearchTexts[rows] case final cached?
+        when cached.excluded == excluded) {
+      return cached.texts;
+    }
+    final texts = [
+      for (final row in rows)
+        SearchQuery.textOf([row.host, row.issue, if (row.exclude) excluded]),
+    ];
+    _hostSearchTexts[rows] = (excluded: excluded, texts: texts);
+    return texts;
+  }
+
+  List<String> get clientSources => [
+    for (final line
+        in lists[MitmList.clientSourceAddress] ?? const <MitmModuleLine>[])
+      if (line.view case MitmSourcesView(:final entries))
+        for (final entry in entries)
+          if (!entry.exclude) entry.network,
+  ];
+}
+
+Future<MitmModuleDetails> readMitmModule(
+  Ref ref,
+  MitmModule module, {
+  String? text,
+  Map<String, String>? arguments,
+}) async {
+  final source =
+      text ??
+      await compute<String, String>(
+        _readModuleText,
+        join(await appPath.mitmModulesDirPath, module.fileName),
+      );
+  return ref
+      .read(coreHandlerProvider)
+      .api
+      .getMitmModuleRead(
+        source,
+        arguments: arguments ?? module.arguments,
+        attachments: mitmAttachments(module),
+        language: mitmModuleLanguage,
+        map: _detailsOf(source),
+      );
+}
+
+/// Made outside [readMitmModule], whose async frame holds `ref`: a closure
+/// made there would carry it and could not reach the decoding isolate.
+MitmModuleDetails Function(MitmModuleRead, MitmCheck) _detailsOf(
+  String source,
+) =>
+    (read, check) => mitmModuleDetailsOf(source, read, check);
+
+MitmModuleDetails mitmModuleDetailsOf(
+  String source,
+  MitmModuleRead read,
+  MitmCheck check,
+) {
+  final lines = source.split(RegExp(r'\r\n|\r|\n'));
+  return (
+    read: read,
+    lists: {
+      for (final list in MitmList.values)
+        list: [
+          for (final index in {
+            ...?check.views[list]?.keys,
+            ...?check.issues[list]?.keys,
+          }.sorted((a, b) => a.compareTo(b)))
+            (
+              line: index,
+              text: lines.elementAtOrNull(index - 1)?.trim() ?? '',
+              issue: check.issues[list]?[index],
+              view: check.views[list]?[index],
+            ),
+        ],
+    },
+  );
+}
+
 /// A module that fails to read adds nothing, so the VPN can still start.
 @riverpod
-Future<List<({String name, MitmModuleContent content})>> enabledMitmModules(
-  Ref ref,
-) async {
+Future<List<({MitmModule module, MitmModuleDetails details})>>
+enabledMitmModules(Ref ref) async {
   if (!ref.watch(
     patchClashConfigProvider.select((state) => state.mitm.enable),
   )) {
     return const [];
   }
   final modules = await ref.watch(mitmModulesProvider.future);
-  final contents = <({String name, MitmModuleContent content})>[];
+  final read = <({MitmModule module, MitmModuleDetails details})>[];
   for (final module in modules.where((module) => module.enabled)) {
     try {
-      final content = await ref.watch(
+      final details = await ref.watch(
         mitmModuleContentProvider(module.id).future,
       );
-      if (content != null) {
-        contents.add((name: module.name, content: content));
+      if (details != null) {
+        read.add((module: module, details: details));
       }
     } catch (e) {
       commonPrint.log(
@@ -342,15 +491,15 @@ Future<List<({String name, MitmModuleContent content})>> enabledMitmModules(
       );
     }
   }
-  return contents;
+  return read;
 }
 
 @riverpod
 Future<Map<String, List<String>>> mitmModuleExits(Ref ref) async {
   final exits = <String, List<String>>{};
   for (final module in await ref.watch(enabledMitmModulesProvider.future)) {
-    for (final exit in module.content.exits) {
-      exits.putIfAbsent(exit, () => []).add(module.name);
+    for (final exit in module.details.read.namedPolicies) {
+      exits.putIfAbsent(exit, () => []).add(module.module.name);
     }
   }
   return exits;
@@ -418,11 +567,14 @@ Future<List<MitmNetworkChangeState>> mitmModuleNetworkChanges(
     if (!module.enabled) {
       continue;
     }
-    final content = await ref.watch(
-      mitmModuleContentProvider(module.id).future,
-    );
-    if (content != null && !content.network.isEmpty) {
-      later.add((module.name, content.network));
+    final MitmModuleDetails? details;
+    try {
+      details = await ref.watch(mitmModuleContentProvider(module.id).future);
+    } catch (_) {
+      continue;
+    }
+    if (details != null && !details.network.isEmpty) {
+      later.add((module.name, details.network));
     }
   }
   return [
@@ -454,17 +606,18 @@ Future<MitmTakeover> mitmTakeover(Ref ref) async {
   final keys = <MitmNetworkKey, String>{};
   final hosts = <String, String>{};
   final nameserverPolicy = <String, String>{};
-  for (final module in await ref.watch(enabledMitmModulesProvider.future)) {
-    for (final change in module.content.network.changes) {
+  for (final enabled in await ref.watch(enabledMitmModulesProvider.future)) {
+    final name = enabled.module.name;
+    for (final change in enabled.details.network.changes) {
       switch (change.key) {
         case MitmNetworkKey.hosts:
-          hosts[change.entry!] = module.name;
+          hosts[change.entry!] = name;
         case MitmNetworkKey.nameserverPolicy:
-          nameserverPolicy[change.entry!] = module.name;
+          nameserverPolicy[change.entry!] = name;
         case MitmNetworkKey.routeExcludeAddress when system.isAndroid:
           break;
         case final key when change.replaces:
-          keys[key] = module.name;
+          keys[key] = name;
         default:
           break;
       }
@@ -477,39 +630,25 @@ Future<MitmTakeover> mitmTakeover(Ref ref) async {
 Future<MitmNetwork> mitmModuleNetwork(Ref ref) async => MitmNetwork.merge(
   (await ref.watch(
     enabledMitmModulesProvider.future,
-  )).map((module) => module.content.network),
+  )).map((module) => module.details.network),
 );
 
-typedef MitmModuleDetails = ({
-  MitmModuleContent content,
-  Map<MitmList, Map<String, String>> issues,
-  Map<MitmList, Map<String, MitmLineView>> views,
-});
-
-MitmModuleContent _parseModuleSource(MitmModuleSource source) =>
-    parseMitmModule(
-      source.content,
-      values: source.arguments,
-      resources: source.resources,
-    );
-
-/// Null while the module's content is not on disk.
+/// The modules in force by the names the profile gives them.
 @riverpod
-Future<MitmModuleDetails?> mitmModuleDetails(Ref ref, int id) async {
-  final content = await ref.watch(mitmModuleContentProvider(id).future);
-  if (content == null) {
-    return null;
-  }
-  final check = await _checkOf(ref, content.mitm);
-  return (content: content, issues: check.issues, views: check.views);
+Future<Map<String, MitmModuleStatus>> mitmModuleStatus(Ref ref) async {
+  ref.watch(
+    coreStatusProvider.select((status) => status == CoreStatus.connected),
+  );
+  final modules = await ref.read(coreHandlerProvider).api.getMitmModuleStatus();
+  return {for (final module in modules) module.name: module};
 }
 
 Duration? _noRetry(int retryCount, Object error) => null;
 
-/// A file that fails to parse fails again until it changes, which rebuilds
-/// this anyway.
+/// Null while the module's file is not on disk. A file that fails to read
+/// fails again until it or the module changes, which rebuilds this anyway.
 @Riverpod(retry: _noRetry)
-Future<MitmModuleContent?> mitmModuleContent(Ref ref, int id) async {
+Future<MitmModuleDetails?> mitmModuleContent(Ref ref, int id) async {
   final module = ref.watch(
     mitmModulesProvider.select(
       (state) => state.value?.firstWhereOrNull((item) => item.id == id),
@@ -518,16 +657,21 @@ Future<MitmModuleContent?> mitmModuleContent(Ref ref, int id) async {
   if (module == null) {
     return null;
   }
+  // A read the Core could not answer is tried again once it connects.
+  ref.watch(
+    coreStatusProvider.select((status) => status == CoreStatus.connected),
+  );
   final file = File(join(await appPath.mitmModulesDirPath, module.fileName));
   if (!await file.exists()) {
     return null;
   }
-  return compute(
-    _parseModuleSource,
-    MitmModuleSource(
-      content: await file.readAsString(),
-      arguments: module.arguments,
-      resources: module.resources,
-    ),
+  return readMitmModule(
+    ref,
+    module,
+    text: await compute(_readModuleText, file.path),
   );
 }
+
+/// A module runs to hundreds of kilobytes, too long to decode on the UI isolate
+/// while a page that shows it moves in.
+String _readModuleText(String path) => File(path).readAsStringSync();

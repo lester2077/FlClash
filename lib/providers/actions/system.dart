@@ -30,6 +30,7 @@ class SystemAction extends _$SystemAction {
   }
 
   Future<void> handleExit([bool needSave = true]) {
+    ref.read(setupActionProvider.notifier).endTrafficFeedForExit();
     final coordinator = _exitCoordinator ??= SystemExitCoordinator(
       watchdogDuration: exitWatchdogDuration,
       closeWindow: closeWindow,
@@ -152,16 +153,25 @@ class SystemAction extends _$SystemAction {
         .update((state) => state.copyWith(autoLaunch: !state.autoLaunch));
   }
 
+  /// Logs a tray the platform refuses rather than throwing, as the first
+  /// show at startup has no caller to report to.
   Future<void> updateTray() async {
-    await trayPort?.update(
-      trayState: ref.read(trayStateProvider),
-      traffic: ref.read(
-        trafficsProvider.select(
-          (state) => state.list.safeLast(const Traffic()),
+    try {
+      await trayPort?.update(
+        trayState: ref.read(trayStateProvider),
+        traffic: ref.read(
+          trafficsProvider.select(
+            (state) => state.list.safeLast(const Traffic()),
+          ),
         ),
-      ),
-      read: globalState.container.read,
-    );
+        read: globalState.container.read,
+      );
+    } catch (error) {
+      commonPrint.log(
+        'Tray operation failed: ${compactError(error)}',
+        logLevel: LogLevel.error,
+      );
+    }
   }
 
   Future<void> updateLocalIp() async {

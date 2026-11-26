@@ -111,10 +111,13 @@ Future<SetupState> setupState(Ref ref, int? profileId) async {
   final profileType = profile?.type ?? ProfileType.file;
   final overrides = ref.watch(profileOverridesProvider(profileId));
   final allProfileProviders = ref.watch(profileProvidersProvider);
-  final mitmModules =
-      ref.watch(patchClashConfigProvider.select((state) => state.mitm.enable))
+  final mitmOn = ref.watch(
+    patchClashConfigProvider.select((state) => state.mitm.enable),
+  );
+  final installedMitmModules = mitmOn
       ? ref.watch(mitmModulesProvider.future)
       : null;
+  final mitmModules = ref.watch(enabledMitmModulesProvider.future);
   List<ProxyGroup> proxyGroups = [];
   List<Rule> rules = [];
   List<Rule> addedRules = [];
@@ -125,27 +128,26 @@ Future<SetupState> setupState(Ref ref, int? profileId) async {
   Script? script;
   if (profileId != null) {
     if (profileType == ProfileType.custom) {
-      rules = await database.rulesDao.queryProfileRules(profileId).get();
-      proxyGroups = await database.proxyGroupsDao.query(profileId).get();
-      clashProviders = await database.clashProvidersDao.query().get();
+      final custom = await database.readApart(_customSetupReader(profileId));
+      rules = custom.rules;
+      proxyGroups = custom.proxyGroups;
+      clashProviders = custom.clashProviders;
       profileProviders = allProfileProviders;
-      appProxies = await database.customProxiesDao.query().get();
-      proxyDialers = {
-        for (final dialer
-            in await database.proxyDialersDao.query(profileId).get())
-          dialer.proxyId: dialer.target,
-      };
+      appProxies = custom.appProxies;
+      proxyDialers = custom.proxyDialers;
     } else {
-      addedRules = await database.rulesDao.queryAddedRules(profileId).get();
-      script = scriptId == null
-          ? null
-          : await database.scriptsDao.get(scriptId).getSingleOrNull();
+      final normal = await database.readApart(
+        _normalSetupReader(profileId, scriptId),
+      );
+      addedRules = normal.addedRules;
+      script = normal.script;
     }
   }
   return SetupState(
-    mitmModules: mitmModules == null
-        ? const []
-        : await mitmModuleSources(await mitmModules),
+    mitmModules: mitmModuleSourcesOf(
+      await installedMitmModules ?? const [],
+      await mitmModules,
+    ),
     clashProviders: clashProviders,
     profileProviders: profileProviders,
     appProxies: appProxies,
@@ -162,30 +164,61 @@ Future<SetupState> setupState(Ref ref, int? profileId) async {
   );
 }
 
-/// A module whose content is not on disk yet adds nothing until it downloads.
-Future<List<MitmModuleSource>> mitmModuleSources(
-  Iterable<MitmModule> modules,
-) async {
-  final directory = await appPath.mitmModulesDirPath;
-  final sources = <MitmModuleSource>[];
-  for (final module in modules) {
-    if (!module.enabled) {
-      continue;
-    }
-    final file = File(join(directory, module.fileName));
-    if (!await file.exists()) {
-      continue;
-    }
-    sources.add(
-      MitmModuleSource(
-        content: await file.readAsString(),
-        arguments: module.arguments,
-        resources: module.resources,
-      ),
-    );
-  }
-  return sources;
+/// Every installed module, so that the Core keeps the files of those off.
+List<MitmModuleSource> mitmModuleSourcesOf(
+  List<MitmModule> installed,
+  List<({MitmModule module, MitmModuleDetails details})> read,
+) {
+  final reads = {for (final (:module, :details) in read) module.id: details};
+  return [
+    for (final module in installed)
+      mitmModuleSourceOf(module, reads[module.id]?.read),
+  ];
 }
+
+MitmModuleSource mitmModuleSourceOf(MitmModule module, MitmModuleRead? read) =>
+    MitmModuleSource(
+      name: '${module.id}',
+      path: '$mitmModulesDirectoryName/${module.fileName}',
+      arguments: module.arguments,
+      attachments: mitmAttachments(module),
+      adoptResources: {
+        for (final MapEntry(:key, :value) in module.resources.entries)
+          if (isMitmResourceUrl(key)) key: value,
+      },
+      enabled: read != null,
+      policies: read?.namedPolicies ?? const {},
+      network: read?.network ?? const {},
+    );
+
+typedef _CustomSetupRead = ({
+  List<Rule> rules,
+  List<ProxyGroup> proxyGroups,
+  List<ClashProvider> clashProviders,
+  List<CustomProxy> appProxies,
+  Map<int, String> proxyDialers,
+});
+
+Future<_CustomSetupRead> Function(Database) _customSetupReader(int profileId) =>
+    (db) async => (
+      rules: await db.rulesDao.queryProfileRules(profileId).get(),
+      proxyGroups: await db.proxyGroupsDao.query(profileId).get(),
+      clashProviders: await db.clashProvidersDao.query().get(),
+      appProxies: await db.customProxiesDao.query().get(),
+      proxyDialers: {
+        for (final dialer in await db.proxyDialersDao.query(profileId).get())
+          dialer.proxyId: dialer.target,
+      },
+    );
+
+Future<({List<Rule> addedRules, Script? script})> Function(Database)
+_normalSetupReader(int profileId, int? scriptId) =>
+    (db) async => (
+      addedRules: await db.rulesDao.queryAddedRules(profileId).get(),
+      script: scriptId == null
+          ? null
+          : await db.scriptsDao.get(scriptId).getSingleOrNull(),
+    );
 
 /// Subscription profiles double as proxy providers for custom profiles.
 @riverpod

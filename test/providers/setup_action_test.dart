@@ -60,11 +60,11 @@ class _CappedDebounceSetupAction extends _UnflooredDebounceSetupAction {
 }
 
 class TestCommonAction extends CommonAction {
-  bool trafficFeed = false;
+  var trafficFeed = TrafficFeed.off;
 
   @override
-  void setTrafficFeed(bool wanted) {
-    trafficFeed = wanted;
+  void setTrafficFeed(TrafficFeed feed) {
+    trafficFeed = feed;
   }
 }
 
@@ -74,20 +74,24 @@ class TestSetupAction extends SetupAction {
   int trafficResets = 0;
   int applyProfileCalls = 0;
   final List<bool> appliedForce = [];
+  Completer<void>? profileGate;
   bool blockCoreCalls = false;
   Error? coreRunningError;
+  Exception? coreRunningException;
   Error? applyError;
   final Set<bool> unansweredCoreCalls = {};
   int authorizeCalls = 0;
   AuthorizeCode authorizeResult = AuthorizeCode.none;
   bool desktop = true;
   DateTime? serviceStart;
+  Completer<DateTime?>? serviceRead;
 
   @override
   bool get tunNeedsAuthorization => desktop;
 
   @override
-  Future<DateTime?> serviceStartTime() async => serviceStart;
+  Future<DateTime?> serviceStartTime() =>
+      serviceRead?.future ?? Future.value(serviceStart);
 
   @override
   Duration get minApplyDebounce => const Duration(milliseconds: 100);
@@ -110,6 +114,10 @@ class TestSetupAction extends SetupAction {
     if (error != null) {
       throw error;
     }
+    final exception = coreRunningException;
+    if (exception != null) {
+      throw exception;
+    }
     if (unansweredCoreCalls.contains(running)) {
       throw const CoreMethodException(code: 'core_unavailable', message: '');
     }
@@ -126,6 +134,9 @@ class TestSetupAction extends SetupAction {
   }) async {
     applyProfileCalls++;
     appliedForce.add(force);
+    if (profileGate case final gate?) {
+      await gate.future;
+    }
     if (applyError case final error?) {
       throw error;
     }
@@ -146,6 +157,7 @@ Future<List<WarningInfo>> _applied(MockCoreApi api) => api.applyConfig(
   overlay: any(named: 'overlay'),
   selection: any(named: 'selection'),
   options: any(named: 'options'),
+  host: any(named: 'host'),
 );
 
 ProfileInspect _inspected({
@@ -199,13 +211,13 @@ void main() {
       ],
     );
     globalState.container = container;
-    globalState.needInitStatus = true;
     container.read(setupActionProvider.notifier);
   });
 
   tearDown(() async {
     action.blockCoreCalls = false;
     action.coreRunningError = null;
+    action.coreRunningException = null;
     action.unansweredCoreCalls.clear();
     for (final gate in action.pendingCoreCalls) {
       if (!gate.isCompleted) {
@@ -214,7 +226,6 @@ void main() {
     }
     await container.read(setupActionProvider.notifier).setRunning(false);
     container.dispose();
-    globalState.needInitStatus = true;
   });
 
   void markInitialized() {
@@ -236,7 +247,6 @@ void main() {
 
       expect(action.coreRunningCalls, [true]);
       expect(action.applyProfileCalls, 1);
-      expect(globalState.needInitStatus, isFalse);
     });
 
     test('safe mode runs the profile but never touches the listener', () async {
@@ -346,6 +356,27 @@ void main() {
       expect(action.trafficResets, 1);
     });
 
+    test('a stop whose answer the transport drops stays stopped, and the '
+        'lost session after it brings nothing back', () async {
+      markInitialized();
+      final setup = container.read(setupActionProvider.notifier);
+      await setup.setRunning(true);
+      action.coreRunningException = const CoreMethodException(
+        code: 'transport_disconnected',
+        message: 'Core transport disconnected',
+      );
+
+      await expectLater(
+        setup.setRunning(false),
+        throwsA(isA<CoreMethodException>()),
+      );
+      setup.onCoreLost();
+
+      expect(container.read(isStartProvider), isFalse);
+      expect(container.read(runTimeProvider), isNull);
+      expect(setup.wantsRunning, isFalse);
+    });
+
     test(
       'an initial start the core leaves unanswered is stopped again',
       () async {
@@ -430,26 +461,26 @@ void main() {
       return scoped.read(setupActionProvider.notifier);
     }
 
-    bool trafficFeed() =>
+    TrafficFeed trafficFeed() =>
         (scoped.read(commonActionProvider.notifier) as TestCommonAction)
             .trafficFeed;
 
     int? runTime() => scoped.read(runTimeProvider);
 
     void setVisible(bool visible) =>
-        scoped.read(appVisibleProvider.notifier).value = visible;
+        scoped.read(appVisibleProvider.notifier).shown = visible;
 
     testWidgets('feeds traffic only while the app is visible', (tester) async {
       final setup = buildScoped();
       await setup.setRunning(true);
-      expect(trafficFeed(), isTrue);
+      expect(trafficFeed(), TrafficFeed.everySecond);
 
       final started = runTime()!;
       await tester.pump(const Duration(seconds: 2));
       expect(runTime(), greaterThan(started));
 
       setVisible(false);
-      expect(trafficFeed(), isFalse);
+      expect(trafficFeed(), TrafficFeed.off);
       final hiddenAt = runTime();
       await tester.pump(const Duration(seconds: 5));
       expect(runTime(), hiddenAt);
@@ -457,12 +488,47 @@ void main() {
 
       setVisible(true);
       await tester.pump();
-      expect(trafficFeed(), isTrue);
+      expect(trafficFeed(), TrafficFeed.everySecond);
       await tester.pump(const Duration(seconds: 1));
       expect(runTime(), greaterThan(hiddenAt!));
 
       await setup.setRunning(false);
-      expect(trafficFeed(), isFalse);
+      expect(trafficFeed(), TrafficFeed.off);
+    });
+
+    testWidgets('the clock moves with each traffic sample, and on its own '
+        'once they stop', (tester) async {
+      final setup = buildScoped();
+      await setup.setRunning(true);
+      await tester.pump(const Duration(milliseconds: 2600));
+      expect(runTime(), 2000);
+
+      scoped.read(trafficsProvider.notifier).addTraffic(const Traffic());
+      expect(runTime(), 3000);
+      await tester.pump(const Duration(milliseconds: 1400));
+      expect(runTime(), 3000);
+
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(runTime(), 4000);
+      await tester.pump(const Duration(seconds: 1));
+      expect(runTime(), 5000);
+
+      await setup.setRunning(false);
+    });
+
+    testWidgets('the clock moves a second for each sample, however late it '
+        'lands', (tester) async {
+      final setup = buildScoped();
+      await setup.setRunning(true);
+      final shown = <int?>[];
+      for (final gap in const [600, 800, 1200, 800, 1200, 100]) {
+        await tester.pump(Duration(milliseconds: gap));
+        scoped.read(trafficsProvider.notifier).addTraffic(const Traffic());
+        shown.add(runTime());
+      }
+      expect(shown, [1000, 2000, 3000, 4000, 5000, 5000]);
+
+      await setup.setRunning(false);
     });
 
     testWidgets('a lost Core session stops the clock for good', (tester) async {
@@ -474,7 +540,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
 
       expect(runTime(), isNull);
-      expect(trafficFeed(), isFalse);
+      expect(trafficFeed(), TrafficFeed.off);
       expect(scoped.read(isStartProvider), isFalse);
     });
 
@@ -487,30 +553,103 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
 
       expect(scoped.read(runTimeProvider), isNotNull);
-      expect(trafficFeed(), isFalse);
+      expect(trafficFeed(), TrafficFeed.off);
 
       setVisible(true);
       await tester.pump();
-      expect(trafficFeed(), isTrue);
+      expect(trafficFeed(), TrafficFeed.everySecond);
 
       await setup.setRunning(false);
     });
 
-    testWidgets('the macOS menu bar title keeps traffic coming while hidden', (
+    testWidgets('a hidden menu bar title takes only the changed samples', (
       tester,
     ) async {
       final setup = buildScoped();
       setVisible(false);
       await setup.setRunning(true);
       await tester.pump(const Duration(seconds: 2));
-      expect(trafficFeed(), isFalse);
+      expect(trafficFeed(), TrafficFeed.off);
 
       scoped
           .read(appSettingProvider.notifier)
           .update((state) => state.copyWith(showTrayTitle: true));
       await tester.pump(const Duration(seconds: 2));
 
-      expect(trafficFeed(), system.isMacOS);
+      expect(
+        trafficFeed(),
+        system.isMacOS ? TrafficFeed.changesOnly : TrafficFeed.off,
+      );
+      final hiddenAt = runTime();
+      await tester.pump(const Duration(seconds: 3));
+      expect(runTime(), hiddenAt, reason: 'no clock to move while hidden');
+
+      setVisible(true);
+      await tester.pump();
+      expect(trafficFeed(), TrafficFeed.everySecond);
+
+      await setup.setRunning(false);
+    });
+
+    testWidgets('dark screens stop the menu bar title feed until they '
+        'light up, keeping the last sample shown', (tester) async {
+      final setup = buildScoped();
+      scoped
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(showTrayTitle: true));
+      setVisible(false);
+      await setup.setRunning(true);
+      await tester.pump();
+      final titled = system.isMacOS ? TrafficFeed.changesOnly : TrafficFeed.off;
+      expect(trafficFeed(), titled);
+      const last = Traffic(up: 2048, down: 4096);
+      scoped.read(trafficsProvider.notifier).addTraffic(last);
+
+      scoped.read(screensSeenProvider.notifier).value = false;
+      expect(trafficFeed(), TrafficFeed.off);
+      await tester.pump(const Duration(seconds: 3));
+      expect(
+        scoped.read(trafficsProvider).list.last,
+        last,
+        reason: 'no zero sample to show on waking',
+      );
+
+      scoped.read(screensSeenProvider.notifier).value = true;
+      expect(trafficFeed(), titled, reason: 'back at once, no debounce');
+
+      scoped.read(screensSeenProvider.notifier).value = false;
+      setVisible(true);
+      expect(
+        trafficFeed(),
+        TrafficFeed.off,
+        reason: 'a window shown on dark screens feeds nothing',
+      );
+      scoped.read(screensSeenProvider.notifier).value = true;
+      await tester.pump();
+      expect(trafficFeed(), TrafficFeed.everySecond);
+
+      await setup.setRunning(false);
+    });
+
+    testWidgets('exit ends the feed for good, so closing the window opens no '
+        'menu bar title watch', (tester) async {
+      final setup = buildScoped();
+      scoped
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(showTrayTitle: true));
+      await setup.setRunning(true);
+      expect(trafficFeed(), TrafficFeed.everySecond);
+
+      setup.endTrafficFeedForExit();
+      expect(trafficFeed(), TrafficFeed.off);
+      final endedAt = runTime();
+
+      setVisible(false);
+      expect(trafficFeed(), TrafficFeed.off);
+      setVisible(true);
+      await tester.pump(const Duration(seconds: 3));
+      expect(trafficFeed(), TrafficFeed.off);
+      expect(runTime(), endedAt);
 
       await setup.setRunning(false);
     });
@@ -843,13 +982,68 @@ void main() {
 
   group('initStatus', () {
     test('is a no-op once the status has already been initialized', () async {
-      globalState.needInitStatus = false;
+      final setup = container.read(setupActionProvider.notifier);
+      await setup.setRunning(true, initialize: true);
+      await setup.initStatus();
 
-      await container.read(setupActionProvider.notifier).initStatus();
-
-      expect(action.coreRunningCalls, isEmpty);
-      expect(action.applyProfileCalls, 0);
+      expect(action.coreRunningCalls, [true]);
+      expect(action.applyProfileCalls, 1);
     });
+
+    test(
+      'initialization waits for a start requested before bootstrap finished',
+      () async {
+        final setup = container.read(setupActionProvider.notifier);
+        final gate = action.profileGate = Completer<void>();
+        final starting = setup.setRunning(true, initialize: true);
+        expect(action.applyProfileCalls, 1);
+
+        var ready = false;
+        final initializing = setup.initStatus().then((_) => ready = true);
+        await pumpEventQueue();
+        expect(ready, isFalse);
+        gate.complete();
+        await initializing;
+        expect(await starting, isTrue);
+        expect(action.applyProfileCalls, 1);
+      },
+    );
+
+    test(
+      'a pending service snapshot yields to a start tapped while it loads',
+      () async {
+        final snapshot = action.serviceRead = Completer<DateTime?>();
+        final gate = action.profileGate = Completer<void>();
+        final setup = container.read(setupActionProvider.notifier);
+        var ready = false;
+        final initializing = setup.initStatus().then((_) => ready = true);
+        final starting = setup.setRunning(true, initialize: true);
+        snapshot.complete(null);
+        await pumpEventQueue();
+        expect(action.applyProfileCalls, 1);
+        expect(ready, isFalse);
+        gate.complete();
+        await initializing;
+        expect(await starting, isTrue);
+        expect(container.read(isStartProvider), isTrue);
+      },
+    );
+
+    test(
+      'a stop during startup reports its error to the request that made it',
+      () async {
+        final setup = container.read(setupActionProvider.notifier);
+        await setup.setRunning(true, initialize: true);
+        action.unansweredCoreCalls.add(false);
+        await expectLater(
+          setup.setRunning(false),
+          throwsA(isA<CoreMethodException>()),
+        );
+        await setup.initStatus();
+        expect(action.coreRunningCalls, [true, false]);
+        expect(action.applyProfileCalls, 1);
+      },
+    );
 
     test('starts the core when autoRun is enabled', () async {
       container.read(appSettingProvider.notifier).value = const AppSettingProps(
@@ -859,7 +1053,6 @@ void main() {
       await container.read(setupActionProvider.notifier).initStatus();
 
       expect(action.coreRunningCalls, [true]);
-      expect(globalState.needInitStatus, isFalse);
     });
 
     test('only applies the profile when autoRun is disabled', () async {
@@ -1072,7 +1265,6 @@ void main() {
     test('an Android one asks for nothing on desktop and keeps its VPN '
         'settings', () async {
       const vpnProps = VpnProps(
-        rootTun: true,
         dnsHijacking: true,
         accessControlProps: AccessControlProps(
           enable: true,
@@ -1494,8 +1686,61 @@ void main() {
       },
     );
 
-    test('a config the Core took is followed by the external controller, '
-        'which the Core never reads from the profile', () async {
+    test(
+      'a config the Core took carries the external controller and the '
+      'host credential, which the Core never reads from the profile',
+      () async {
+        final profile = Profile.normal(label: 'p', url: 'http://127.0.0.1:9/');
+        final mocks = coreMocks();
+        when(() => _applied(mocks.api)).thenAnswer((_) async => const []);
+        when(() => mocks.api.lastWarnings()).thenAnswer((_) async => const []);
+        when(() => mocks.api.patchConfig(any())).thenAnswer((_) async => 1);
+        final scoped = ProviderContainer(
+          overrides: [
+            profilesProvider.overrideWith(() => TestProfiles([profile])),
+            currentProfileIdProvider.overrideWithBuild((_, _) => profile.id),
+            setupStateProvider.overrideWith((_, _) => nullProfileSetupState),
+            coreHandlerProvider.overrideWithValue(mocks.controller),
+            setupActionProvider.overrideWith(SetupAction.new),
+            hostCredentialProvider.overrideWithValue('h:s'),
+          ],
+        );
+        addTearDown(scoped.dispose);
+        scoped.listen(patchClashConfigProvider, (_, _) {});
+        scoped
+            .read(patchClashConfigProvider.notifier)
+            .value = const PatchClashConfig(
+          externalController: ExternalControllerStatus.open,
+          secret: 's',
+        );
+
+        expect(
+          await scoped
+              .read(setupActionProvider.notifier)
+              .applyProfile(force: true),
+          isTrue,
+        );
+
+        final host =
+            verify(
+                  () => mocks.api.applyConfig(
+                    profilePath: any(named: 'profilePath'),
+                    overlay: any(named: 'overlay'),
+                    selection: any(named: 'selection'),
+                    options: any(named: 'options'),
+                    host: captureAny(named: 'host'),
+                  ),
+                ).captured.single
+                as Map<String, Object?>;
+        expect(host['externalController'], '127.0.0.1:9090');
+        expect(host['secret'], 's');
+        expect(host['hostCredential'], 'h:s');
+        verifyNever(() => mocks.api.patchConfig(any()));
+      },
+    );
+
+    test('a resume that finds the config already applied still hands the '
+        'Core the external controller and the host credential', () async {
       final profile = Profile.normal(label: 'p', url: 'http://127.0.0.1:9/');
       final mocks = coreMocks();
       when(() => _applied(mocks.api)).thenAnswer((_) async => const []);
@@ -1508,6 +1753,7 @@ void main() {
           setupStateProvider.overrideWith((_, _) => nullProfileSetupState),
           coreHandlerProvider.overrideWithValue(mocks.controller),
           setupActionProvider.overrideWith(SetupAction.new),
+          hostCredentialProvider.overrideWithValue('h:s'),
         ],
       );
       addTearDown(scoped.dispose);
@@ -1518,20 +1764,24 @@ void main() {
         externalController: ExternalControllerStatus.open,
         secret: 's',
       );
+      final action = scoped.read(setupActionProvider.notifier);
+      expect(await action.applyProfile(force: true), isTrue);
+      clearInteractions(mocks.api);
 
-      expect(
-        await scoped
-            .read(setupActionProvider.notifier)
-            .applyProfile(force: true),
-        isTrue,
-      );
+      expect(await action.applyProfile(), isTrue);
 
+      verifyNever(() => _applied(mocks.api));
       final patch =
           verify(() => mocks.api.patchConfig(captureAny())).captured.single
               as ConfigPatch;
       expect(patch.externalController, '127.0.0.1:9090');
       expect(patch.secret, 's');
-      expect(patch.mode, isNull);
+      expect(patch.hostCredential, 'h:s');
+      expect(
+        (patch.toJson()['options']! as Map).containsKey('mitmTrustedCa'),
+        isFalse,
+        reason: 'options without it give the CA trust back to the config',
+      );
     });
 
     test('the warnings of a setup are kept, whether the Core took it or '
@@ -1582,6 +1832,45 @@ void main() {
       rejecting = true;
       expect(await setupAction.applyProfile(force: true), isFalse);
       expect(scoped.read(configWarningsStateProvider), [warning]);
+    });
+
+    test('a resume that finds the config already applied still shows the '
+        'warnings the Core kept from it', () async {
+      final profile = Profile.normal(label: 'p', url: 'http://127.0.0.1:9/');
+      final mocks = coreMocks();
+      when(() => _applied(mocks.api)).thenAnswer((_) async => const []);
+      when(() => mocks.api.patchConfig(any())).thenAnswer((_) async => 1);
+      when(() => mocks.api.lastWarnings()).thenAnswer(
+        (_) async => const [
+          WarningInfo(level: 'warning', path: 'proxies[1]', message: 'x'),
+        ],
+      );
+      final scoped = ProviderContainer(
+        overrides: [
+          profilesProvider.overrideWith(() => TestProfiles([profile])),
+          currentProfileIdProvider.overrideWithBuild((_, _) => profile.id),
+          setupStateProvider.overrideWith((_, _) => nullProfileSetupState),
+          coreHandlerProvider.overrideWithValue(mocks.controller),
+          setupActionProvider.overrideWith(SetupAction.new),
+        ],
+      );
+      addTearDown(scoped.dispose);
+      scoped.read(coreStatusProvider.notifier).value = CoreStatus.connected;
+      final action = scoped.read(setupActionProvider.notifier);
+      expect(await action.applyProfile(force: true), isTrue);
+      scoped.read(configWarningsStateProvider.notifier).value = const [];
+      clearInteractions(mocks.api);
+
+      expect(await action.applyProfile(), isTrue);
+
+      verifyNever(() => _applied(mocks.api));
+      expect(scoped.read(configWarningsStateProvider), const [
+        ConfigWarning(
+          level: ConfigWarningLevel.warning,
+          path: 'proxies[1]',
+          message: 'x',
+        ),
+      ]);
     });
 
     test('a setup against a Core marked stopped leaves no warnings beside '
@@ -2355,6 +2644,38 @@ void main() {
         local['path'],
         await appPath.getProviderCachePath(localRule.fileName),
       );
+    });
+
+    test('with no profile the config carries the settings and MITM, '
+        'and no rule or proxy, so everything goes direct', () async {
+      final mocks = coreMocks();
+      final scoped = ProviderContainer(
+        overrides: [
+          coreHandlerProvider.overrideWithValue(mocks.controller),
+          setupActionProvider.overrideWith(SetupAction.new),
+        ],
+      );
+      addTearDown(scoped.dispose);
+
+      final res = await scoped
+          .read(setupActionProvider.notifier)
+          .getProfile(
+            setupState: nullProfileSetupState,
+            patchConfig: const PatchClashConfig(
+              mitm: Mitm(enable: true, hostname: ['a.example']),
+            ),
+          );
+      final config = loadYaml(res.yaml) as YamlMap;
+
+      verifyNever(() => mocks.api.readConfig(any()));
+      expect(res.base, isNull);
+      expect(config['mitm']['enable'], isTrue);
+      expect(config['mitm']['hostname'], contains('a.example'));
+      expect(config['tun'], isA<YamlMap>());
+      expect(config['dns'], isA<YamlMap>());
+      expect(config['mode'], 'rule');
+      expect(config['rules'], isEmpty);
+      expect(config.containsKey('proxies'), isFalse);
     });
 
     test('a provider a custom profile names carries its options', () async {

@@ -2,6 +2,7 @@ import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/models/models.dart';
 
 import 'core_api.dart';
+import 'dto.dart';
 import 'mapping.dart';
 
 /// [CoreApi] answers in wire types; these read them as the app's models.
@@ -30,6 +31,8 @@ extension ModelApi on CoreApi {
 
   Future<String> dumpRules(String profilePath) async =>
       (await dumpRuleSet(profilePath)).text ?? '';
+
+  Future<RuleTable> getRules() async => RuleTable.fromJson(await ruleList());
 
   Future<OutboundIpResult> probeOutboundIp(
     OutboundIpParams params, {
@@ -64,8 +67,39 @@ extension ModelApi on CoreApi {
   Future<MitmCertificate> createMitmCertificate() async =>
       MitmCertificate.fromJson(await generateMitmCertificate());
 
-  Future<MitmCheck> checkMitmRules(MitmRules rules) async {
-    final result = await validateMitm(rules.toJson());
+  Future<MitmCheck> checkMitmRules(MitmRules rules) async =>
+      mitmCheckOf(await validateMitm(rules.toJson()));
+
+  /// [map] runs where the answer is decoded, as [CoreApi.readMitmModule]'s
+  /// `read` does.
+  Future<T> getMitmModuleRead<T>(
+    String text, {
+    Map<String, String> arguments = const {},
+    Map<String, String> attachments = const {},
+    String language = '',
+    required T Function(MitmModuleRead read, MitmCheck check) map,
+  }) => readMitmModule(
+    text,
+    arguments: arguments,
+    attachments: attachments,
+    language: language,
+    read: _moduleReader(map),
+  );
+
+  static T Function(JsonMap answer) _moduleReader<T>(
+    T Function(MitmModuleRead read, MitmCheck check) map,
+  ) =>
+      (answer) => map(MitmModuleRead.fromJson(answer), mitmCheckOf(answer));
+
+  Future<List<MitmModuleStatus>> getMitmModuleStatus() async {
+    final status = await mitmModuleStatus();
+    return [
+      for (final module in status['modules'] as List? ?? const [])
+        MitmModuleStatus.fromJson(Map<String, Object?>.from(module as Map)),
+    ];
+  }
+
+  static MitmCheck mitmCheckOf(Map<String, Object?> result) {
     Map<MitmList, Map<int, T>> byLine<T>(
       Object? lists,
       T? Function(Map item) valueOf,
@@ -107,6 +141,14 @@ extension ModelApi on CoreApi {
       MitmExchangeList.fromJson(
         Map<String, Object?>.from(await mitmExchanges(connectionId) as Map),
       );
+
+  Future<MitmQueryPage> queryMitmExchanges({
+    int? before,
+    int? since,
+    required int limit,
+  }) async => mitmQueryPageOf(
+    await mitmQuery(before: before, since: since, limit: limit),
+  );
 
   /// Null once the Core no longer keeps the request.
   Future<MitmExchange?> getMitmExchange(int id) async {

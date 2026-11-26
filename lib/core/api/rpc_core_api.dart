@@ -111,6 +111,7 @@ final class RpcCoreApi implements CoreApi {
     JsonMap? overlay,
     Map<String, String> selection = const {},
     required CoreOptionsArg options,
+    JsonMap? host,
   }) {
     return _call(
       'config.apply',
@@ -120,6 +121,7 @@ final class RpcCoreApi implements CoreApi {
         'overlay': ?overlay,
         'selection': selection,
         'options': options.toJson(),
+        'host': ?host,
       },
     );
   }
@@ -340,6 +342,9 @@ final class RpcCoreApi implements CoreApi {
       );
 
   @override
+  Future<Object?> ruleList() => _call('rule.list', (r) => _object(r));
+
+  @override
   Future<RuleSetInfoDto> compileRuleSet(String name, {String? url}) => _call(
     'ruleSet.compile',
     (r) => RuleSetInfoDto.fromJson(_object(r)),
@@ -354,13 +359,19 @@ final class RpcCoreApi implements CoreApi {
   Stream<TrafficSample> watchTraffic({
     int? intervalMs,
     bool onlyProxy = false,
+    bool changesOnly = false,
   }) {
     return client
         .watch<TrafficSample, TrafficSample>(
           'traffic.watch',
-          params: {'intervalMs': ?intervalMs, 'onlyProxy': onlyProxy},
+          params: {
+            'intervalMs': ?intervalMs,
+            'onlyProxy': onlyProxy,
+            if (changesOnly) 'changesOnly': true,
+          },
           decodeSnapshot: (r) => TrafficSample.fromJson(_object(r)),
           decodeEvent: TrafficSample.fromJson,
+          maxBatchMs: 0,
         )
         .expand((frame) => [?frame.snapshot, ...frame.events]);
   }
@@ -423,11 +434,11 @@ final class RpcCoreApi implements CoreApi {
   }
 
   @override
-  Stream<List<DnsEntry>> watchDns() {
+  Stream<({List<DnsEntry> entries, int dropped})> watchDns() {
     return client
         .watch<Object?, DnsEntry>('dns.watch', decodeEvent: DnsEntry.fromJson)
-        .map((frame) => frame.events)
-        .where((events) => events.isNotEmpty);
+        .where((frame) => frame.events.isNotEmpty || frame.dropped > 0)
+        .map((frame) => (entries: frame.events, dropped: frame.dropped));
   }
 
   @override
@@ -546,6 +557,27 @@ final class RpcCoreApi implements CoreApi {
   );
 
   @override
+  Future<MitmQueryAnswer> mitmQuery({
+    MitmFilter filter = const MitmFilter(),
+    int? before,
+    int? limit,
+    int? since,
+    bool facets = false,
+    int? rateFrom,
+  }) => _call(
+    'mitm.query',
+    (r) => MitmQueryAnswer.fromJson(_object(r)),
+    params: {
+      'filter': filter.toJson(),
+      'before': ?before,
+      'limit': ?limit,
+      'since': ?since,
+      if (facets) 'facets': true,
+      'rateFrom': ?rateFrom,
+    },
+  );
+
+  @override
   Future<Object?> mitmExchange(int id) =>
       _find<Object?>('mitm.exchange', _resultOrNull, params: {'id': id});
 
@@ -555,6 +587,54 @@ final class RpcCoreApi implements CoreApi {
     _resultOrNull,
     params: {'id': id, 'response': response},
   );
+
+  @override
+  Future<T> readMitmModule<T>(
+    String text, {
+    Map<String, String> arguments = const {},
+    Map<String, String> attachments = const {},
+    String language = '',
+    required T Function(JsonMap answer) read,
+  }) async {
+    final mapped = await _call(
+      'mitm.readModule',
+      _carrying(read),
+      params: {
+        'text': text,
+        'arguments': arguments,
+        'attachments': attachments,
+        'language': language,
+      },
+    );
+    if (mapped.error case final error?) {
+      return Future.error(error, mapped.stack);
+    }
+    return mapped.value as T;
+  }
+
+  /// Made outside an async body, whose frame the closure would carry; the
+  /// stack goes back as text, which any isolate can send.
+  static ({T? value, Object? error, StackTrace? stack}) Function(Object? result)
+  _carrying<T>(T Function(JsonMap answer) read) => (result) {
+    final answer = _object(result);
+    try {
+      return (value: read(answer), error: null, stack: null);
+    } catch (error, stack) {
+      return (
+        value: null,
+        error: error,
+        stack: StackTrace.fromString('$stack'),
+      );
+    }
+  };
+
+  @override
+  Future<JsonMap> mitmModuleStatus() =>
+      _call('mitm.moduleStatus', (r) => _object(r));
+
+  @override
+  Future<void> fetchMitmModule({String? name}) =>
+      _call('mitm.fetchModule', (_) {}, params: {'name': ?name});
 }
 
 Object? _resultOrNull(Object? result) => _object(result)['result'];

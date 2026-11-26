@@ -4729,7 +4729,7 @@ as String?,
 /// @nodoc
 mixin _$SharedState {
 
-@JsonKey(includeIfNull: false) SetupParams? get setupParams; VpnOptions? get vpnOptions; String get stopTip; String get startTip; String get currentProfileName; String get stopText; bool get onlyStatisticsProxy; bool get showStopAction;
+@JsonKey(includeIfNull: false) SetupParams? get setupParams; VpnOptions? get vpnOptions; String get stopTip; String get startTip; String get currentProfileName; String get stopText; bool get onlyStatisticsProxy; bool get showStopAction; bool get mitm;
 /// Create a copy of SharedState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -4743,20 +4743,20 @@ $SharedStateCopyWith<SharedState> get copyWith => _$SharedStateCopyWithImpl<Shar
 @override
 bool operator ==(Object other) {
   final _this = this as SharedState;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SharedState&&(identical(other.setupParams, _this.setupParams) || other.setupParams == _this.setupParams)&&(identical(other.vpnOptions, _this.vpnOptions) || other.vpnOptions == _this.vpnOptions)&&(identical(other.stopTip, _this.stopTip) || other.stopTip == _this.stopTip)&&(identical(other.startTip, _this.startTip) || other.startTip == _this.startTip)&&(identical(other.currentProfileName, _this.currentProfileName) || other.currentProfileName == _this.currentProfileName)&&(identical(other.stopText, _this.stopText) || other.stopText == _this.stopText)&&(identical(other.onlyStatisticsProxy, _this.onlyStatisticsProxy) || other.onlyStatisticsProxy == _this.onlyStatisticsProxy)&&(identical(other.showStopAction, _this.showStopAction) || other.showStopAction == _this.showStopAction));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SharedState&&(identical(other.setupParams, _this.setupParams) || other.setupParams == _this.setupParams)&&(identical(other.vpnOptions, _this.vpnOptions) || other.vpnOptions == _this.vpnOptions)&&(identical(other.stopTip, _this.stopTip) || other.stopTip == _this.stopTip)&&(identical(other.startTip, _this.startTip) || other.startTip == _this.startTip)&&(identical(other.currentProfileName, _this.currentProfileName) || other.currentProfileName == _this.currentProfileName)&&(identical(other.stopText, _this.stopText) || other.stopText == _this.stopText)&&(identical(other.onlyStatisticsProxy, _this.onlyStatisticsProxy) || other.onlyStatisticsProxy == _this.onlyStatisticsProxy)&&(identical(other.showStopAction, _this.showStopAction) || other.showStopAction == _this.showStopAction)&&(identical(other.mitm, _this.mitm) || other.mitm == _this.mitm));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
   final _this = this as SharedState;
-  return Object.hash(runtimeType,_this.setupParams,_this.vpnOptions,_this.stopTip,_this.startTip,_this.currentProfileName,_this.stopText,_this.onlyStatisticsProxy,_this.showStopAction);
+  return Object.hash(runtimeType,_this.setupParams,_this.vpnOptions,_this.stopTip,_this.startTip,_this.currentProfileName,_this.stopText,_this.onlyStatisticsProxy,_this.showStopAction,_this.mitm);
 }
 
 @override
 String toString() {
   final _this = this as SharedState;
-  return 'SharedState(setupParams: ${_this.setupParams}, vpnOptions: ${_this.vpnOptions}, stopTip: ${_this.stopTip}, startTip: ${_this.startTip}, currentProfileName: ${_this.currentProfileName}, stopText: ${_this.stopText}, onlyStatisticsProxy: ${_this.onlyStatisticsProxy}, showStopAction: ${_this.showStopAction})';
+  return 'SharedState(setupParams: ${_this.setupParams}, vpnOptions: ${_this.vpnOptions}, stopTip: ${_this.stopTip}, startTip: ${_this.startTip}, currentProfileName: ${_this.currentProfileName}, stopText: ${_this.stopText}, onlyStatisticsProxy: ${_this.onlyStatisticsProxy}, showStopAction: ${_this.showStopAction}, mitm: ${_this.mitm})';
 }
 
 
@@ -4767,7 +4767,7 @@ abstract mixin class $SharedStateCopyWith<$Res>  {
   factory $SharedStateCopyWith(SharedState value, $Res Function(SharedState) _then) = _$SharedStateCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(includeIfNull: false) SetupParams? setupParams, VpnOptions? vpnOptions, String stopTip, String startTip, String currentProfileName, String stopText, bool onlyStatisticsProxy, bool showStopAction
+@JsonKey(includeIfNull: false) SetupParams? setupParams, VpnOptions? vpnOptions, String stopTip, String startTip, String currentProfileName, String stopText, bool onlyStatisticsProxy, bool showStopAction, bool mitm
 });
 
 
@@ -4784,7 +4784,7 @@ class _$SharedStateCopyWithImpl<$Res>
 
 /// Create a copy of SharedState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? setupParams = freezed,Object? vpnOptions = freezed,Object? stopTip = null,Object? startTip = null,Object? currentProfileName = null,Object? stopText = null,Object? onlyStatisticsProxy = null,Object? showStopAction = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? setupParams = freezed,Object? vpnOptions = freezed,Object? stopTip = null,Object? startTip = null,Object? currentProfileName = null,Object? stopText = null,Object? onlyStatisticsProxy = null,Object? showStopAction = null,Object? mitm = null,}) {
   return _then(SharedState(
 setupParams: freezed == setupParams ? _self.setupParams : setupParams // ignore: cast_nullable_to_non_nullable
 as SetupParams?,vpnOptions: freezed == vpnOptions ? _self.vpnOptions : vpnOptions // ignore: cast_nullable_to_non_nullable
@@ -4794,6 +4794,7 @@ as String,currentProfileName: null == currentProfileName ? _self.currentProfileN
 as String,stopText: null == stopText ? _self.stopText : stopText // ignore: cast_nullable_to_non_nullable
 as String,onlyStatisticsProxy: null == onlyStatisticsProxy ? _self.onlyStatisticsProxy : onlyStatisticsProxy // ignore: cast_nullable_to_non_nullable
 as bool,showStopAction: null == showStopAction ? _self.showStopAction : showStopAction // ignore: cast_nullable_to_non_nullable
+as bool,mitm: null == mitm ? _self.mitm : mitm // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -4903,10 +4904,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction,  bool mitm)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SharedState() when $default != null:
-return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction);case _:
+return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction,_that.mitm);case _:
   return orElse();
 
 }
@@ -4924,10 +4925,10 @@ return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction,  bool mitm)  $default,) {final _that = this;
 switch (_that) {
 case _SharedState():
-return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction);case _:
+return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction,_that.mitm);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -4944,10 +4945,10 @@ return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(includeIfNull: false)  SetupParams? setupParams,  VpnOptions? vpnOptions,  String stopTip,  String startTip,  String currentProfileName,  String stopText,  bool onlyStatisticsProxy,  bool showStopAction,  bool mitm)?  $default,) {final _that = this;
 switch (_that) {
 case _SharedState() when $default != null:
-return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction);case _:
+return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,_that.currentProfileName,_that.stopText,_that.onlyStatisticsProxy,_that.showStopAction,_that.mitm);case _:
   return null;
 
 }
@@ -4959,7 +4960,7 @@ return $default(_that.setupParams,_that.vpnOptions,_that.stopTip,_that.startTip,
 @JsonSerializable()
 
 class _SharedState implements SharedState {
-  const _SharedState({@JsonKey(includeIfNull: false) this.setupParams, this.vpnOptions, required this.stopTip, required this.startTip, required this.currentProfileName, required this.stopText, required this.onlyStatisticsProxy, this.showStopAction = true});
+  const _SharedState({@JsonKey(includeIfNull: false) this.setupParams, this.vpnOptions, required this.stopTip, required this.startTip, required this.currentProfileName, required this.stopText, required this.onlyStatisticsProxy, this.showStopAction = true, this.mitm = false});
   factory _SharedState.fromJson(Map<String, dynamic> json) => _$SharedStateFromJson(json);
 
 @override@JsonKey(includeIfNull: false) final  SetupParams? setupParams;
@@ -4970,6 +4971,7 @@ class _SharedState implements SharedState {
 @override final  String stopText;
 @override final  bool onlyStatisticsProxy;
 @override@JsonKey() final  bool showStopAction;
+@override@JsonKey() final  bool mitm;
 
 /// Create a copy of SharedState
 /// with the given fields replaced by the non-null parameter values.
@@ -4984,18 +4986,18 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SharedState&&(identical(other.setupParams, setupParams) || other.setupParams == setupParams)&&(identical(other.vpnOptions, vpnOptions) || other.vpnOptions == vpnOptions)&&(identical(other.stopTip, stopTip) || other.stopTip == stopTip)&&(identical(other.startTip, startTip) || other.startTip == startTip)&&(identical(other.currentProfileName, currentProfileName) || other.currentProfileName == currentProfileName)&&(identical(other.stopText, stopText) || other.stopText == stopText)&&(identical(other.onlyStatisticsProxy, onlyStatisticsProxy) || other.onlyStatisticsProxy == onlyStatisticsProxy)&&(identical(other.showStopAction, showStopAction) || other.showStopAction == showStopAction));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SharedState&&(identical(other.setupParams, setupParams) || other.setupParams == setupParams)&&(identical(other.vpnOptions, vpnOptions) || other.vpnOptions == vpnOptions)&&(identical(other.stopTip, stopTip) || other.stopTip == stopTip)&&(identical(other.startTip, startTip) || other.startTip == startTip)&&(identical(other.currentProfileName, currentProfileName) || other.currentProfileName == currentProfileName)&&(identical(other.stopText, stopText) || other.stopText == stopText)&&(identical(other.onlyStatisticsProxy, onlyStatisticsProxy) || other.onlyStatisticsProxy == onlyStatisticsProxy)&&(identical(other.showStopAction, showStopAction) || other.showStopAction == showStopAction)&&(identical(other.mitm, mitm) || other.mitm == mitm));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
-    return Object.hash(runtimeType,setupParams,vpnOptions,stopTip,startTip,currentProfileName,stopText,onlyStatisticsProxy,showStopAction);
+    return Object.hash(runtimeType,setupParams,vpnOptions,stopTip,startTip,currentProfileName,stopText,onlyStatisticsProxy,showStopAction,mitm);
 }
 
 @override
 String toString() {
-    return 'SharedState(setupParams: $setupParams, vpnOptions: $vpnOptions, stopTip: $stopTip, startTip: $startTip, currentProfileName: $currentProfileName, stopText: $stopText, onlyStatisticsProxy: $onlyStatisticsProxy, showStopAction: $showStopAction)';
+    return 'SharedState(setupParams: $setupParams, vpnOptions: $vpnOptions, stopTip: $stopTip, startTip: $startTip, currentProfileName: $currentProfileName, stopText: $stopText, onlyStatisticsProxy: $onlyStatisticsProxy, showStopAction: $showStopAction, mitm: $mitm)';
 }
 
 
@@ -5006,7 +5008,7 @@ abstract mixin class _$SharedStateCopyWith<$Res> implements $SharedStateCopyWith
   factory _$SharedStateCopyWith(_SharedState value, $Res Function(_SharedState) _then) = __$SharedStateCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(includeIfNull: false) SetupParams? setupParams, VpnOptions? vpnOptions, String stopTip, String startTip, String currentProfileName, String stopText, bool onlyStatisticsProxy, bool showStopAction
+@JsonKey(includeIfNull: false) SetupParams? setupParams, VpnOptions? vpnOptions, String stopTip, String startTip, String currentProfileName, String stopText, bool onlyStatisticsProxy, bool showStopAction, bool mitm
 });
 
 
@@ -5023,7 +5025,7 @@ class __$SharedStateCopyWithImpl<$Res>
 
 /// Create a copy of SharedState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? setupParams = freezed,Object? vpnOptions = freezed,Object? stopTip = null,Object? startTip = null,Object? currentProfileName = null,Object? stopText = null,Object? onlyStatisticsProxy = null,Object? showStopAction = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? setupParams = freezed,Object? vpnOptions = freezed,Object? stopTip = null,Object? startTip = null,Object? currentProfileName = null,Object? stopText = null,Object? onlyStatisticsProxy = null,Object? showStopAction = null,Object? mitm = null,}) {
   return _then(_SharedState(
 setupParams: freezed == setupParams ? _self.setupParams : setupParams // ignore: cast_nullable_to_non_nullable
 as SetupParams?,vpnOptions: freezed == vpnOptions ? _self.vpnOptions : vpnOptions // ignore: cast_nullable_to_non_nullable
@@ -5033,6 +5035,7 @@ as String,currentProfileName: null == currentProfileName ? _self.currentProfileN
 as String,stopText: null == stopText ? _self.stopText : stopText // ignore: cast_nullable_to_non_nullable
 as String,onlyStatisticsProxy: null == onlyStatisticsProxy ? _self.onlyStatisticsProxy : onlyStatisticsProxy // ignore: cast_nullable_to_non_nullable
 as bool,showStopAction: null == showStopAction ? _self.showStopAction : showStopAction // ignore: cast_nullable_to_non_nullable
+as bool,mitm: null == mitm ? _self.mitm : mitm // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -5355,7 +5358,7 @@ as String,
 /// @nodoc
 mixin _$MakeRealProfileState {
 
- String get profilesPath; int get profileId; Map<String, dynamic> get rawConfig; PatchClashConfig get realPatchConfig; ProfileOverrides get overrides; bool get bypassPrivateRoute; bool get appendSystemDns;/// `Platform.operatingSystem` of the Core the config is for; null is this one.
+ String get profilesPath; int? get profileId; Map<String, dynamic> get rawConfig; PatchClashConfig get realPatchConfig; ProfileOverrides get overrides; bool get bypassPrivateRoute; bool get appendSystemDns;/// `Platform.operatingSystem` of the Core the config is for; null is this one.
  String? get os; List<ProxyGroup> get proxyGroups; List<Rule> get rules; List<Rule> get addedRules; String get defaultUA; List<String> get authentication;/// Keeps the built config as an object beside its text, for a profile
 /// whose Core merges it over the profile's own file.
  bool get keepOverlay; Map<String, dynamic> get injectedProxyProviders; Map<String, dynamic> get injectedRuleProviders; Map<String, String> get exitTargets;/// The profile's own outbounds when [rawConfig] does not carry them.
@@ -5395,7 +5398,7 @@ abstract mixin class $MakeRealProfileStateCopyWith<$Res>  {
   factory $MakeRealProfileStateCopyWith(MakeRealProfileState value, $Res Function(MakeRealProfileState) _then) = _$MakeRealProfileStateCopyWithImpl;
 @useResult
 $Res call({
- String profilesPath, int profileId, Map<String, dynamic> rawConfig, PatchClashConfig realPatchConfig, ProfileOverrides overrides, bool bypassPrivateRoute, bool appendSystemDns, String? os, List<ProxyGroup> proxyGroups, List<Rule> rules, List<Rule> addedRules, String defaultUA, List<String> authentication, bool keepOverlay, Map<String, dynamic> injectedProxyProviders, Map<String, dynamic> injectedRuleProviders, Map<String, String> exitTargets, Set<String>? outboundNames, String? defaultExitTarget, bool safeMode, List<MitmModuleSource> mitmModules
+ String profilesPath, int? profileId, Map<String, dynamic> rawConfig, PatchClashConfig realPatchConfig, ProfileOverrides overrides, bool bypassPrivateRoute, bool appendSystemDns, String? os, List<ProxyGroup> proxyGroups, List<Rule> rules, List<Rule> addedRules, String defaultUA, List<String> authentication, bool keepOverlay, Map<String, dynamic> injectedProxyProviders, Map<String, dynamic> injectedRuleProviders, Map<String, String> exitTargets, Set<String>? outboundNames, String? defaultExitTarget, bool safeMode, List<MitmModuleSource> mitmModules
 });
 
 
@@ -5412,11 +5415,11 @@ class _$MakeRealProfileStateCopyWithImpl<$Res>
 
 /// Create a copy of MakeRealProfileState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? profilesPath = null,Object? profileId = null,Object? rawConfig = null,Object? realPatchConfig = null,Object? overrides = null,Object? bypassPrivateRoute = null,Object? appendSystemDns = null,Object? os = freezed,Object? proxyGroups = null,Object? rules = null,Object? addedRules = null,Object? defaultUA = null,Object? authentication = null,Object? keepOverlay = null,Object? injectedProxyProviders = null,Object? injectedRuleProviders = null,Object? exitTargets = null,Object? outboundNames = freezed,Object? defaultExitTarget = freezed,Object? safeMode = null,Object? mitmModules = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? profilesPath = null,Object? profileId = freezed,Object? rawConfig = null,Object? realPatchConfig = null,Object? overrides = null,Object? bypassPrivateRoute = null,Object? appendSystemDns = null,Object? os = freezed,Object? proxyGroups = null,Object? rules = null,Object? addedRules = null,Object? defaultUA = null,Object? authentication = null,Object? keepOverlay = null,Object? injectedProxyProviders = null,Object? injectedRuleProviders = null,Object? exitTargets = null,Object? outboundNames = freezed,Object? defaultExitTarget = freezed,Object? safeMode = null,Object? mitmModules = null,}) {
   return _then(MakeRealProfileState(
 profilesPath: null == profilesPath ? _self.profilesPath : profilesPath // ignore: cast_nullable_to_non_nullable
-as String,profileId: null == profileId ? _self.profileId : profileId // ignore: cast_nullable_to_non_nullable
-as int,rawConfig: null == rawConfig ? _self.rawConfig : rawConfig // ignore: cast_nullable_to_non_nullable
+as String,profileId: freezed == profileId ? _self.profileId : profileId // ignore: cast_nullable_to_non_nullable
+as int?,rawConfig: null == rawConfig ? _self.rawConfig : rawConfig // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>,realPatchConfig: null == realPatchConfig ? _self.realPatchConfig : realPatchConfig // ignore: cast_nullable_to_non_nullable
 as PatchClashConfig,overrides: null == overrides ? _self.overrides : overrides // ignore: cast_nullable_to_non_nullable
 as ProfileOverrides,bypassPrivateRoute: null == bypassPrivateRoute ? _self.bypassPrivateRoute : bypassPrivateRoute // ignore: cast_nullable_to_non_nullable
@@ -5538,7 +5541,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String profilesPath,  int profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String profilesPath,  int? profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MakeRealProfileState() when $default != null:
 return $default(_that.profilesPath,_that.profileId,_that.rawConfig,_that.realPatchConfig,_that.overrides,_that.bypassPrivateRoute,_that.appendSystemDns,_that.os,_that.proxyGroups,_that.rules,_that.addedRules,_that.defaultUA,_that.authentication,_that.keepOverlay,_that.injectedProxyProviders,_that.injectedRuleProviders,_that.exitTargets,_that.outboundNames,_that.defaultExitTarget,_that.safeMode,_that.mitmModules);case _:
@@ -5559,7 +5562,7 @@ return $default(_that.profilesPath,_that.profileId,_that.rawConfig,_that.realPat
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String profilesPath,  int profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String profilesPath,  int? profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)  $default,) {final _that = this;
 switch (_that) {
 case _MakeRealProfileState():
 return $default(_that.profilesPath,_that.profileId,_that.rawConfig,_that.realPatchConfig,_that.overrides,_that.bypassPrivateRoute,_that.appendSystemDns,_that.os,_that.proxyGroups,_that.rules,_that.addedRules,_that.defaultUA,_that.authentication,_that.keepOverlay,_that.injectedProxyProviders,_that.injectedRuleProviders,_that.exitTargets,_that.outboundNames,_that.defaultExitTarget,_that.safeMode,_that.mitmModules);case _:
@@ -5579,7 +5582,7 @@ return $default(_that.profilesPath,_that.profileId,_that.rawConfig,_that.realPat
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String profilesPath,  int profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String profilesPath,  int? profileId,  Map<String, dynamic> rawConfig,  PatchClashConfig realPatchConfig,  ProfileOverrides overrides,  bool bypassPrivateRoute,  bool appendSystemDns,  String? os,  List<ProxyGroup> proxyGroups,  List<Rule> rules,  List<Rule> addedRules,  String defaultUA,  List<String> authentication,  bool keepOverlay,  Map<String, dynamic> injectedProxyProviders,  Map<String, dynamic> injectedRuleProviders,  Map<String, String> exitTargets,  Set<String>? outboundNames,  String? defaultExitTarget,  bool safeMode,  List<MitmModuleSource> mitmModules)?  $default,) {final _that = this;
 switch (_that) {
 case _MakeRealProfileState() when $default != null:
 return $default(_that.profilesPath,_that.profileId,_that.rawConfig,_that.realPatchConfig,_that.overrides,_that.bypassPrivateRoute,_that.appendSystemDns,_that.os,_that.proxyGroups,_that.rules,_that.addedRules,_that.defaultUA,_that.authentication,_that.keepOverlay,_that.injectedProxyProviders,_that.injectedRuleProviders,_that.exitTargets,_that.outboundNames,_that.defaultExitTarget,_that.safeMode,_that.mitmModules);case _:
@@ -5598,7 +5601,7 @@ class _MakeRealProfileState implements MakeRealProfileState {
   
 
 @override final  String profilesPath;
-@override final  int profileId;
+@override final  int? profileId;
  final  Map<String, dynamic> _rawConfig;
 @override Map<String, dynamic> get rawConfig {
   if (_rawConfig is EqualUnmodifiableMapView) return _rawConfig;
@@ -5718,7 +5721,7 @@ abstract mixin class _$MakeRealProfileStateCopyWith<$Res> implements $MakeRealPr
   factory _$MakeRealProfileStateCopyWith(_MakeRealProfileState value, $Res Function(_MakeRealProfileState) _then) = __$MakeRealProfileStateCopyWithImpl;
 @override @useResult
 $Res call({
- String profilesPath, int profileId, Map<String, dynamic> rawConfig, PatchClashConfig realPatchConfig, ProfileOverrides overrides, bool bypassPrivateRoute, bool appendSystemDns, String? os, List<ProxyGroup> proxyGroups, List<Rule> rules, List<Rule> addedRules, String defaultUA, List<String> authentication, bool keepOverlay, Map<String, dynamic> injectedProxyProviders, Map<String, dynamic> injectedRuleProviders, Map<String, String> exitTargets, Set<String>? outboundNames, String? defaultExitTarget, bool safeMode, List<MitmModuleSource> mitmModules
+ String profilesPath, int? profileId, Map<String, dynamic> rawConfig, PatchClashConfig realPatchConfig, ProfileOverrides overrides, bool bypassPrivateRoute, bool appendSystemDns, String? os, List<ProxyGroup> proxyGroups, List<Rule> rules, List<Rule> addedRules, String defaultUA, List<String> authentication, bool keepOverlay, Map<String, dynamic> injectedProxyProviders, Map<String, dynamic> injectedRuleProviders, Map<String, String> exitTargets, Set<String>? outboundNames, String? defaultExitTarget, bool safeMode, List<MitmModuleSource> mitmModules
 });
 
 
@@ -5735,11 +5738,11 @@ class __$MakeRealProfileStateCopyWithImpl<$Res>
 
 /// Create a copy of MakeRealProfileState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? profilesPath = null,Object? profileId = null,Object? rawConfig = null,Object? realPatchConfig = null,Object? overrides = null,Object? bypassPrivateRoute = null,Object? appendSystemDns = null,Object? os = freezed,Object? proxyGroups = null,Object? rules = null,Object? addedRules = null,Object? defaultUA = null,Object? authentication = null,Object? keepOverlay = null,Object? injectedProxyProviders = null,Object? injectedRuleProviders = null,Object? exitTargets = null,Object? outboundNames = freezed,Object? defaultExitTarget = freezed,Object? safeMode = null,Object? mitmModules = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? profilesPath = null,Object? profileId = freezed,Object? rawConfig = null,Object? realPatchConfig = null,Object? overrides = null,Object? bypassPrivateRoute = null,Object? appendSystemDns = null,Object? os = freezed,Object? proxyGroups = null,Object? rules = null,Object? addedRules = null,Object? defaultUA = null,Object? authentication = null,Object? keepOverlay = null,Object? injectedProxyProviders = null,Object? injectedRuleProviders = null,Object? exitTargets = null,Object? outboundNames = freezed,Object? defaultExitTarget = freezed,Object? safeMode = null,Object? mitmModules = null,}) {
   return _then(_MakeRealProfileState(
 profilesPath: null == profilesPath ? _self.profilesPath : profilesPath // ignore: cast_nullable_to_non_nullable
-as String,profileId: null == profileId ? _self.profileId : profileId // ignore: cast_nullable_to_non_nullable
-as int,rawConfig: null == rawConfig ? _self._rawConfig : rawConfig // ignore: cast_nullable_to_non_nullable
+as String,profileId: freezed == profileId ? _self.profileId : profileId // ignore: cast_nullable_to_non_nullable
+as int?,rawConfig: null == rawConfig ? _self._rawConfig : rawConfig // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>,realPatchConfig: null == realPatchConfig ? _self.realPatchConfig : realPatchConfig // ignore: cast_nullable_to_non_nullable
 as PatchClashConfig,overrides: null == overrides ? _self.overrides : overrides // ignore: cast_nullable_to_non_nullable
 as ProfileOverrides,bypassPrivateRoute: null == bypassPrivateRoute ? _self.bypassPrivateRoute : bypassPrivateRoute // ignore: cast_nullable_to_non_nullable
@@ -5786,7 +5789,7 @@ $ProfileOverridesCopyWith<$Res> get overrides {
 /// @nodoc
 mixin _$MitmModuleSource {
 
- String get content; Map<String, String> get arguments; Map<String, String> get resources;
+ String get name; String get path; Map<String, String> get arguments; Map<String, String> get attachments; Map<String, String> get adoptResources; bool get enabled; Set<String> get policies; Map<String, Object?> get network;
 /// Create a copy of MitmModuleSource
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -5798,20 +5801,20 @@ $MitmModuleSourceCopyWith<MitmModuleSource> get copyWith => _$MitmModuleSourceCo
 @override
 bool operator ==(Object other) {
   final _this = this as MitmModuleSource;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is MitmModuleSource&&(identical(other.content, _this.content) || other.content == _this.content)&&const DeepCollectionEquality().equals(other.arguments, _this.arguments)&&const DeepCollectionEquality().equals(other.resources, _this.resources));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is MitmModuleSource&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.path, _this.path) || other.path == _this.path)&&const DeepCollectionEquality().equals(other.arguments, _this.arguments)&&const DeepCollectionEquality().equals(other.attachments, _this.attachments)&&const DeepCollectionEquality().equals(other.adoptResources, _this.adoptResources)&&(identical(other.enabled, _this.enabled) || other.enabled == _this.enabled)&&const DeepCollectionEquality().equals(other.policies, _this.policies)&&const DeepCollectionEquality().equals(other.network, _this.network));
 }
 
 
 @override
 int get hashCode {
   final _this = this as MitmModuleSource;
-  return Object.hash(runtimeType,_this.content,const DeepCollectionEquality().hash(_this.arguments),const DeepCollectionEquality().hash(_this.resources));
+  return Object.hash(runtimeType,_this.name,_this.path,const DeepCollectionEquality().hash(_this.arguments),const DeepCollectionEquality().hash(_this.attachments),const DeepCollectionEquality().hash(_this.adoptResources),_this.enabled,const DeepCollectionEquality().hash(_this.policies),const DeepCollectionEquality().hash(_this.network));
 }
 
 @override
 String toString() {
   final _this = this as MitmModuleSource;
-  return 'MitmModuleSource(content: ${_this.content}, arguments: ${_this.arguments}, resources: ${_this.resources})';
+  return 'MitmModuleSource(name: ${_this.name}, path: ${_this.path}, arguments: ${_this.arguments}, attachments: ${_this.attachments}, adoptResources: ${_this.adoptResources}, enabled: ${_this.enabled}, policies: ${_this.policies}, network: ${_this.network})';
 }
 
 
@@ -5822,7 +5825,7 @@ abstract mixin class $MitmModuleSourceCopyWith<$Res>  {
   factory $MitmModuleSourceCopyWith(MitmModuleSource value, $Res Function(MitmModuleSource) _then) = _$MitmModuleSourceCopyWithImpl;
 @useResult
 $Res call({
- String content, Map<String, String> arguments, Map<String, String> resources
+ String name, String path, Map<String, String> arguments, Map<String, String> attachments, Map<String, String> adoptResources, bool enabled, Set<String> policies, Map<String, Object?> network
 });
 
 
@@ -5839,12 +5842,17 @@ class _$MitmModuleSourceCopyWithImpl<$Res>
 
 /// Create a copy of MitmModuleSource
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? content = null,Object? arguments = null,Object? resources = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? name = null,Object? path = null,Object? arguments = null,Object? attachments = null,Object? adoptResources = null,Object? enabled = null,Object? policies = null,Object? network = null,}) {
   return _then(MitmModuleSource(
-content: null == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
+name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,arguments: null == arguments ? _self.arguments : arguments // ignore: cast_nullable_to_non_nullable
-as Map<String, String>,resources: null == resources ? _self.resources : resources // ignore: cast_nullable_to_non_nullable
-as Map<String, String>,
+as Map<String, String>,attachments: null == attachments ? _self.attachments : attachments // ignore: cast_nullable_to_non_nullable
+as Map<String, String>,adoptResources: null == adoptResources ? _self.adoptResources : adoptResources // ignore: cast_nullable_to_non_nullable
+as Map<String, String>,enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,policies: null == policies ? _self.policies : policies // ignore: cast_nullable_to_non_nullable
+as Set<String>,network: null == network ? _self.network : network // ignore: cast_nullable_to_non_nullable
+as Map<String, Object?>,
   ));
 }
 
@@ -5929,10 +5937,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String content,  Map<String, String> arguments,  Map<String, String> resources)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String name,  String path,  Map<String, String> arguments,  Map<String, String> attachments,  Map<String, String> adoptResources,  bool enabled,  Set<String> policies,  Map<String, Object?> network)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MitmModuleSource() when $default != null:
-return $default(_that.content,_that.arguments,_that.resources);case _:
+return $default(_that.name,_that.path,_that.arguments,_that.attachments,_that.adoptResources,_that.enabled,_that.policies,_that.network);case _:
   return orElse();
 
 }
@@ -5950,10 +5958,10 @@ return $default(_that.content,_that.arguments,_that.resources);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String content,  Map<String, String> arguments,  Map<String, String> resources)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String name,  String path,  Map<String, String> arguments,  Map<String, String> attachments,  Map<String, String> adoptResources,  bool enabled,  Set<String> policies,  Map<String, Object?> network)  $default,) {final _that = this;
 switch (_that) {
 case _MitmModuleSource():
-return $default(_that.content,_that.arguments,_that.resources);case _:
+return $default(_that.name,_that.path,_that.arguments,_that.attachments,_that.adoptResources,_that.enabled,_that.policies,_that.network);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -5970,10 +5978,10 @@ return $default(_that.content,_that.arguments,_that.resources);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String content,  Map<String, String> arguments,  Map<String, String> resources)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String name,  String path,  Map<String, String> arguments,  Map<String, String> attachments,  Map<String, String> adoptResources,  bool enabled,  Set<String> policies,  Map<String, Object?> network)?  $default,) {final _that = this;
 switch (_that) {
 case _MitmModuleSource() when $default != null:
-return $default(_that.content,_that.arguments,_that.resources);case _:
+return $default(_that.name,_that.path,_that.arguments,_that.attachments,_that.adoptResources,_that.enabled,_that.policies,_that.network);case _:
   return null;
 
 }
@@ -5985,10 +5993,11 @@ return $default(_that.content,_that.arguments,_that.resources);case _:
 
 
 class _MitmModuleSource implements MitmModuleSource {
-  const _MitmModuleSource({required this.content,  Map<String, String> arguments = const {},  Map<String, String> resources = const {}}): _arguments = arguments,_resources = resources;
+  const _MitmModuleSource({required this.name, required this.path,  Map<String, String> arguments = const {},  Map<String, String> attachments = const {},  Map<String, String> adoptResources = const {}, this.enabled = true,  Set<String> policies = const {},  Map<String, Object?> network = const {}}): _arguments = arguments,_attachments = attachments,_adoptResources = adoptResources,_policies = policies,_network = network;
   
 
-@override final  String content;
+@override final  String name;
+@override final  String path;
  final  Map<String, String> _arguments;
 @override@JsonKey() Map<String, String> get arguments {
   if (_arguments is EqualUnmodifiableMapView) return _arguments;
@@ -5996,11 +6005,33 @@ class _MitmModuleSource implements MitmModuleSource {
   return EqualUnmodifiableMapView(_arguments);
 }
 
- final  Map<String, String> _resources;
-@override@JsonKey() Map<String, String> get resources {
-  if (_resources is EqualUnmodifiableMapView) return _resources;
+ final  Map<String, String> _attachments;
+@override@JsonKey() Map<String, String> get attachments {
+  if (_attachments is EqualUnmodifiableMapView) return _attachments;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableMapView(_resources);
+  return EqualUnmodifiableMapView(_attachments);
+}
+
+ final  Map<String, String> _adoptResources;
+@override@JsonKey() Map<String, String> get adoptResources {
+  if (_adoptResources is EqualUnmodifiableMapView) return _adoptResources;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableMapView(_adoptResources);
+}
+
+@override@JsonKey() final  bool enabled;
+ final  Set<String> _policies;
+@override@JsonKey() Set<String> get policies {
+  if (_policies is EqualUnmodifiableSetView) return _policies;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableSetView(_policies);
+}
+
+ final  Map<String, Object?> _network;
+@override@JsonKey() Map<String, Object?> get network {
+  if (_network is EqualUnmodifiableMapView) return _network;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableMapView(_network);
 }
 
 
@@ -6014,18 +6045,18 @@ _$MitmModuleSourceCopyWith<_MitmModuleSource> get copyWith => __$MitmModuleSourc
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _MitmModuleSource&&(identical(other.content, content) || other.content == content)&&const DeepCollectionEquality().equals(other.arguments, _arguments)&&const DeepCollectionEquality().equals(other.resources, _resources));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _MitmModuleSource&&(identical(other.name, name) || other.name == name)&&(identical(other.path, path) || other.path == path)&&const DeepCollectionEquality().equals(other.arguments, _arguments)&&const DeepCollectionEquality().equals(other.attachments, _attachments)&&const DeepCollectionEquality().equals(other.adoptResources, _adoptResources)&&(identical(other.enabled, enabled) || other.enabled == enabled)&&const DeepCollectionEquality().equals(other.policies, _policies)&&const DeepCollectionEquality().equals(other.network, _network));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,content,const DeepCollectionEquality().hash(_arguments),const DeepCollectionEquality().hash(_resources));
+    return Object.hash(runtimeType,name,path,const DeepCollectionEquality().hash(_arguments),const DeepCollectionEquality().hash(_attachments),const DeepCollectionEquality().hash(_adoptResources),enabled,const DeepCollectionEquality().hash(_policies),const DeepCollectionEquality().hash(_network));
 }
 
 @override
 String toString() {
-    return 'MitmModuleSource(content: $content, arguments: $arguments, resources: $resources)';
+    return 'MitmModuleSource(name: $name, path: $path, arguments: $arguments, attachments: $attachments, adoptResources: $adoptResources, enabled: $enabled, policies: $policies, network: $network)';
 }
 
 
@@ -6036,7 +6067,7 @@ abstract mixin class _$MitmModuleSourceCopyWith<$Res> implements $MitmModuleSour
   factory _$MitmModuleSourceCopyWith(_MitmModuleSource value, $Res Function(_MitmModuleSource) _then) = __$MitmModuleSourceCopyWithImpl;
 @override @useResult
 $Res call({
- String content, Map<String, String> arguments, Map<String, String> resources
+ String name, String path, Map<String, String> arguments, Map<String, String> attachments, Map<String, String> adoptResources, bool enabled, Set<String> policies, Map<String, Object?> network
 });
 
 
@@ -6053,12 +6084,17 @@ class __$MitmModuleSourceCopyWithImpl<$Res>
 
 /// Create a copy of MitmModuleSource
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? content = null,Object? arguments = null,Object? resources = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? name = null,Object? path = null,Object? arguments = null,Object? attachments = null,Object? adoptResources = null,Object? enabled = null,Object? policies = null,Object? network = null,}) {
   return _then(_MitmModuleSource(
-content: null == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
+name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,arguments: null == arguments ? _self._arguments : arguments // ignore: cast_nullable_to_non_nullable
-as Map<String, String>,resources: null == resources ? _self._resources : resources // ignore: cast_nullable_to_non_nullable
-as Map<String, String>,
+as Map<String, String>,attachments: null == attachments ? _self._attachments : attachments // ignore: cast_nullable_to_non_nullable
+as Map<String, String>,adoptResources: null == adoptResources ? _self._adoptResources : adoptResources // ignore: cast_nullable_to_non_nullable
+as Map<String, String>,enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,policies: null == policies ? _self._policies : policies // ignore: cast_nullable_to_non_nullable
+as Set<String>,network: null == network ? _self._network : network // ignore: cast_nullable_to_non_nullable
+as Map<String, Object?>,
   ));
 }
 

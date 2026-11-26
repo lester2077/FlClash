@@ -71,6 +71,7 @@ final class ConfigPatch {
   final ControllerCorsArg? externalControllerCors;
   final bool? unifiedDelay;
   final List<String>? authentication;
+  final String? hostCredential;
   final bool? geoAutoUpdate;
   final int? geoUpdateInterval;
   final Map<String, String>? geoxUrl;
@@ -90,6 +91,7 @@ final class ConfigPatch {
     this.externalControllerCors,
     this.unifiedDelay,
     this.authentication,
+    this.hostCredential,
     this.geoAutoUpdate,
     this.geoUpdateInterval,
     this.geoxUrl,
@@ -110,6 +112,7 @@ final class ConfigPatch {
     'externalControllerCors': ?externalControllerCors?.toJson(),
     'unifiedDelay': ?unifiedDelay,
     'authentication': ?authentication,
+    'hostCredential': ?hostCredential,
     'geoAutoUpdate': ?geoAutoUpdate,
     'geoUpdateInterval': ?geoUpdateInterval,
     if (geoxUrl != null && geoxUrl!.isNotEmpty) 'geoxUrl': geoxUrl,
@@ -188,11 +191,13 @@ abstract interface class CoreApi {
   Future<void> stopEngine();
 
   /// A null [profilePath] applies the config.yaml already in the home directory.
+  /// A null [host] keeps the host settings in force; [hostSettingsOf] makes one.
   Future<List<WarningInfo>> applyConfig({
     String? profilePath,
     JsonMap? overlay,
     Map<String, String> selection = const {},
     required CoreOptionsArg options,
+    JsonMap? host,
   });
 
   /// Answers the `seq` of the change it made, or of the last change when it
@@ -260,11 +265,17 @@ abstract interface class CoreApi {
 
   Future<TextOutput> dumpRuleSet(String profilePath, {String? outputFile});
 
+  Future<Object?> ruleList();
+
   Future<RuleSetInfoDto> compileRuleSet(String name, {String? url});
 
   Future<void> updateGeo(String kind);
 
-  Stream<TrafficSample> watchTraffic({int? intervalMs, bool onlyProxy = false});
+  Stream<TrafficSample> watchTraffic({
+    int? intervalMs,
+    bool onlyProxy = false,
+    bool changesOnly = false,
+  });
 
   Future<void> resetTraffic();
 
@@ -286,7 +297,9 @@ abstract interface class CoreApi {
 
   Stream<List<LogEntry>> watchLogs({LogLevel level = LogLevel.debug});
 
-  Stream<List<DnsEntry>> watchDns();
+  /// Each batch with how many queries the Core dropped before it, which a
+  /// paused or slow reader loses past the Core's queue.
+  Stream<({List<DnsEntry> entries, int dropped})> watchDns();
 
   Stream<RouteStampDto> watchRoute();
 
@@ -326,7 +339,30 @@ abstract interface class CoreApi {
 
   Future<Object?> mitmExchanges(int connectionId);
 
+  Future<MitmQueryAnswer> mitmQuery({
+    MitmFilter filter = const MitmFilter(),
+    int? before,
+    int? limit,
+    int? since,
+    bool facets = false,
+    int? rateFrom,
+  });
+
   Future<Object?> mitmExchange(int id);
 
   Future<Object?> mitmBody(int id, {required bool response});
+
+  /// [read] runs where the answer is decoded, which for a large module is
+  /// another isolate, so it may only hold what an isolate can receive.
+  Future<T> readMitmModule<T>(
+    String text, {
+    Map<String, String> arguments = const {},
+    Map<String, String> attachments = const {},
+    String language = '',
+    required T Function(JsonMap answer) read,
+  });
+
+  Future<JsonMap> mitmModuleStatus();
+
+  Future<void> fetchMitmModule({String? name});
 }
