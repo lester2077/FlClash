@@ -1,6 +1,11 @@
 name: Sync all upstream branches
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/sync-upstream.yaml
   schedule:
     - cron: '17 22 * * *'
   workflow_dispatch:
@@ -14,11 +19,11 @@ concurrency:
 
 jobs:
   sync:
-    if: github.repository_id == '1465058140'
+    if: github.repository_id == '1465058140' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Sync source code without importing upstream workflows
+      - name: Mirror upstream source without importing upstream workflows
         env:
           GH_TOKEN: ${{ github.token }}
           GIT_TERMINAL_PROMPT: '0'
@@ -38,79 +43,55 @@ jobs:
           import subprocess
 
           workflow = '.github/workflows/sync-upstream.yaml'
+          target_branches = ('main', 'dev', 'rs')
 
           def git(*args, data=None):
               return subprocess.run(
                   ['git', *args], input=data, stdout=subprocess.PIPE, check=True,
-              ).stdout.decode('utf-8').strip()
-
-          def source_tree(commit):
-              git('read-tree', commit)
-              paths = git('ls-files', '-z', '--', '.github/workflows')
-              if paths:
-                  git('update-index', '--force-remove', '-z', '--stdin', data=paths.encode())
-              return git('write-tree')
-
-          def commit_tree(tree, message, *parents):
-              parent_args = [argument for parent in parents for argument in ('-p', parent)]
-              return git('commit-tree', tree, *parent_args, '-m', message)
+              ).stdout
 
           def branches(remote):
               return dict(
                   line.split(' ', 1)
                   for line in git('for-each-ref', '--format=%(refname:lstrip=3) %(objectname)',
-                                  f'refs/remotes/{remote}/').splitlines()
+                                  f'refs/remotes/{remote}/').decode().splitlines()
               )
 
           def sync(branch, upstream, current):
-              theirs = source_tree(upstream)
-              tree = theirs
-              if current:
-                  baseline = git('log', '-1', '--first-parent',
-                                 '--grep=^FlClash-Upstream: [a-f0-9][a-f0-9]*$',
-                                 '--format=%(trailers:key=FlClash-Upstream,valueonly)', current)
-                  if not baseline:
-                      baseline = git('merge-base', current, upstream)
-                  if baseline == upstream:
-                      return 'Already up to date'
-                  base = source_tree(baseline)
-                  ours = source_tree(current)
-                  if ours == base:
-                      tree = theirs
-                  elif theirs == base:
-                      tree = ours
-                  else:
-                      base_commit = commit_tree(base, 'Upstream baseline')
-                      ours_commit = commit_tree(ours, 'Fork source', base_commit)
-                      theirs_commit = commit_tree(theirs, 'Upstream source', base_commit)
-                      tree = git('merge-tree', '--write-tree', ours_commit, theirs_commit)
-                  git('read-tree', tree)
-                  entry = git('ls-tree', current, '--', workflow)
-                  if entry:
-                      mode, _, blob = entry.split('\t', 1)[0].split()
-                      git('update-index', '--add', '--cacheinfo', f'{mode},{blob},{workflow}')
-                  tree = git('write-tree')
-                  if tree == git('rev-parse', f'{current}^{{tree}}'):
-                      return 'No source changes'
+              git('read-tree', upstream)
+              paths = git('ls-files', '-z', '--', '.github/workflows')
+              if paths:
+                  git('update-index', '--force-remove', '-z', '--stdin', data=paths)
+              if branch == 'main':
+                  mode, _, blob = workflow_entry.split('\t', 1)[0].split()
+                  git('update-index', '--add', '--cacheinfo', f'{mode},{blob},{workflow}')
+              tree = git('write-tree').decode().strip()
+              if current and tree == git('rev-parse', f'{current}^{{tree}}').decode().strip():
+                  return 'Already up to date'
 
               message = f'chore: sync upstream {branch}\n\nFlClash-Upstream: {upstream}'
-              updated = commit_tree(tree, message, *([current] if current else []))
+              parents = ['-p', current] if current else []
+              updated = git('commit-tree', tree, *parents, '-m', message).decode().strip()
               git('-c', 'credential.helper=!gh auth git-credential', 'push', 'origin',
                   f'{updated}:refs/heads/{branch}')
-              return f'Updated to upstream {upstream[:12]}' if current else f'Created from {upstream[:12]}'
+              return f'Mirrored upstream {upstream[:12]}'
 
           fork_heads = branches('origin')
           upstream_heads = branches('upstream')
-          if not upstream_heads:
-              raise SystemExit('No upstream branches found')
+          missing = [branch for branch in target_branches if branch not in upstream_heads]
+          if missing:
+              raise SystemExit(f'Missing upstream branches: {", ".join(missing)}')
+          workflow_entry = git('ls-tree', fork_heads['main'], '--', workflow).decode().strip()
+          if not workflow_entry:
+              raise SystemExit('The fork main branch is missing its sync workflow')
 
           results = []
           failed = False
-          for branch, upstream in upstream_heads.items():
+          for branch in target_branches:
               try:
-                  result = sync(branch, upstream, fork_heads.get(branch))
+                  result = sync(branch, upstream_heads[branch], fork_heads.get(branch))
               except subprocess.CalledProcessError as error:
-                  result = f'Failed: git {error.cmd[1]} exited with {error.returncode}'
+                  result = f'Failed: {error}'
                   failed = True
               line = f'{branch}: {result}'
               results.append(line)
